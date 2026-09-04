@@ -85,6 +85,7 @@ fun MarkdownText(
     wrapsCodeBlockLines: Boolean = true,
     isStreaming: Boolean = false,
     streamedTextAnimationEnabled: Boolean = false,
+    transcriptTextScale: Float = 1.0f,
 ) {
     var usesStreamingRenderer by remember { mutableStateOf(isStreaming) }
     LaunchedEffect(isStreaming) {
@@ -101,6 +102,7 @@ fun MarkdownText(
             modifier = modifier,
             wrapsCodeBlockLines = wrapsCodeBlockLines,
             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+            transcriptTextScale = transcriptTextScale,
         )
         return
     }
@@ -110,6 +112,7 @@ fun MarkdownText(
         wrapsCodeBlockLines = wrapsCodeBlockLines,
         isStreaming = false,
         streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+        transcriptTextScale = transcriptTextScale,
     )
 }
 
@@ -120,7 +123,12 @@ private fun StructuredMarkdownText(
     wrapsCodeBlockLines: Boolean = true,
     isStreaming: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
 ) {
+    val scaledBodyMedium = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = MaterialTheme.typography.bodyMedium.fontSize * transcriptTextScale,
+        lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * transcriptTextScale,
+    )
     val plainTextChunks = remember(markdown) { markdownPlainTextChunksForLargeContent(markdown) }
     if (plainTextChunks != null) {
         SelectionContainer {
@@ -128,7 +136,7 @@ private fun StructuredMarkdownText(
                 plainTextChunks.forEach { chunk ->
                     Text(
                         text = chunk,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = scaledBodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -153,6 +161,7 @@ private fun StructuredMarkdownText(
             modifier = modifier,
             isStreaming = isStreaming,
             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+            transcriptTextScale = transcriptTextScale,
         )
         return
     }
@@ -168,6 +177,7 @@ private fun StructuredMarkdownText(
                             markdown = segment.text,
                             isStreaming = isStreaming,
                             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                            transcriptTextScale = transcriptTextScale,
                         )
                     }
                 }
@@ -175,6 +185,7 @@ private fun StructuredMarkdownText(
                     language = segment.language,
                     content = segment.content,
                     startsWrapped = wrapsCodeBlockLines,
+                    transcriptTextScale = transcriptTextScale,
                 )
             }
         }
@@ -187,6 +198,7 @@ private fun StreamingStructuredMarkdown(
     modifier: Modifier,
     wrapsCodeBlockLines: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
 ) {
     val latestMarkdown by rememberUpdatedState(markdown)
     var renderedMarkdown by remember { mutableStateOf(markdown) }
@@ -205,6 +217,7 @@ private fun StreamingStructuredMarkdown(
                     wrapsCodeBlockLines = wrapsCodeBlockLines,
                     isStreaming = false,
                     streamedTextAnimationEnabled = false,
+                    transcriptTextScale = transcriptTextScale,
                 )
             }
         }
@@ -214,6 +227,7 @@ private fun StreamingStructuredMarkdown(
                 wrapsCodeBlockLines = wrapsCodeBlockLines,
                 isStreaming = true,
                 streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                transcriptTextScale = transcriptTextScale,
             )
         }
     }
@@ -261,6 +275,7 @@ private fun MarkdownAndroidView(
     modifier: Modifier = Modifier,
     isStreaming: Boolean = false,
     streamedTextAnimationEnabled: Boolean = false,
+    transcriptTextScale: Float,
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -269,7 +284,7 @@ private fun MarkdownAndroidView(
     val codeBackground = colorScheme.surfaceVariant.toArgb()
     val dividerColor = colorScheme.outlineVariant.toArgb()
     val isDarkTheme = colorScheme.background.luminance() < 0.5f
-    val latexTextSizePx = with(LocalDensity.current) { 15.sp.toPx() }
+    val latexTextSizePx = with(LocalDensity.current) { (15.sp * transcriptTextScale).toPx() }
     val markwon = remember(context, textColor, linkColor, codeBackground, dividerColor, isDarkTheme, latexTextSizePx) {
         try {
             MarkdownRendererCache.get(
@@ -304,7 +319,10 @@ private fun MarkdownAndroidView(
             Text(
                 text = markdown,
                 modifier = modifier,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize * transcriptTextScale,
+                    lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * transcriptTextScale,
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
@@ -317,7 +335,7 @@ private fun MarkdownAndroidView(
         },
         factory = {
             TextView(it).apply {
-                textSize = 15f
+                textSize = 15f * transcriptTextScale
                 setTextColor(textColor)
                 setLinkTextColor(linkColor)
                 setTextIsSelectable(true)
@@ -326,6 +344,7 @@ private fun MarkdownAndroidView(
             }
         },
         update = { textView ->
+            textView.textSize = 15f * transcriptTextScale
             textView.setTextColor(textColor)
             textView.setLinkTextColor(linkColor)
             textView.setHorizontallyScrolling(false)
@@ -509,6 +528,7 @@ private fun ChatCodeBlock(
     language: String?,
     content: String,
     startsWrapped: Boolean,
+    transcriptTextScale: Float,
 ) {
     val context = LocalContext.current
     var wraps by remember(content) { mutableStateOf(startsWrapped) }
@@ -557,10 +577,18 @@ private fun ChatCodeBlock(
             val scrollState = rememberScrollState()
             SelectionContainer {
                 if (wraps) {
-                    CodeText(content = content, modifier = codeModifier)
+                    CodeText(
+                        content = content,
+                        modifier = codeModifier,
+                        transcriptTextScale = transcriptTextScale,
+                    )
                 } else {
                     Row(Modifier.horizontalScroll(scrollState)) {
-                        CodeText(content = content, modifier = codeModifier)
+                        CodeText(
+                            content = content,
+                            modifier = codeModifier,
+                            transcriptTextScale = transcriptTextScale,
+                        )
                     }
                 }
             }
@@ -572,13 +600,15 @@ private fun ChatCodeBlock(
 private fun CodeText(
     content: String,
     modifier: Modifier = Modifier,
+    transcriptTextScale: Float,
 ) {
     Text(
         text = content.ifEmpty { " " },
         modifier = modifier,
         style = MaterialTheme.typography.bodySmall.copy(
             fontFamily = FontFamily.Monospace,
-            lineHeight = 18.sp,
+            fontSize = MaterialTheme.typography.bodySmall.fontSize * transcriptTextScale,
+            lineHeight = 18.sp * transcriptTextScale,
         ),
         color = MaterialTheme.colorScheme.onSurface,
     )

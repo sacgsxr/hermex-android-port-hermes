@@ -88,6 +88,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -111,7 +112,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
+
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -168,6 +171,7 @@ import com.uzairansar.hermex.core.model.shouldRenderTranscriptItem
 import com.uzairansar.hermex.data.preferences.ChatDisplaySettings
 import com.uzairansar.hermex.data.preferences.DictationProviderPreference
 import com.uzairansar.hermex.data.preferences.LocalSettingsRepository
+import com.uzairansar.hermex.data.preferences.normalizeTranscriptTextScale
 import com.uzairansar.hermex.data.preferences.ModelFavoriteKey
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
 import com.uzairansar.hermex.data.repository.WorkspaceRepository
@@ -205,6 +209,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import java.io.File
@@ -298,6 +303,11 @@ fun ChatRoute(
     val chatDisplaySettings by remember(localSettingsRepository) {
         localSettingsRepository?.chatDisplaySettings ?: flowOf(ChatDisplaySettings())
     }.collectAsStateWithLifecycle(initialValue = ChatDisplaySettings())
+    val effectiveTranscriptTextScale = remember { mutableFloatStateOf(chatDisplaySettings.transcriptTextScale) }
+    LaunchedEffect(chatDisplaySettings.transcriptTextScale) {
+        effectiveTranscriptTextScale.floatValue = normalizeTranscriptTextScale(chatDisplaySettings.transcriptTextScale)
+    }
+    val currentLocalSettingsRepository by rememberUpdatedState(localSettingsRepository)
     val streamingSendBehavior by remember(localSettingsRepository) {
         localSettingsRepository?.streamingSendBehavior ?: flowOf(StreamingSendBehavior.Steer)
     }.collectAsStateWithLifecycle(initialValue = StreamingSendBehavior.Steer)
@@ -893,6 +903,57 @@ fun ChatRoute(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = statusBarHeight)
+                        .pointerInput(Unit) {
+                            while (true) {
+                                var finalScale: Float? = null
+                                try {
+                                    awaitPointerEventScope {
+                                        var pinchPointerIds: List<androidx.compose.ui.input.pointer.PointerId>? = null
+                                        var initialDistance = 0f
+                                        var initialScale = 1f
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val pressedChanges = event.changes.filter { it.pressed }
+                                            if (pinchPointerIds == null) {
+                                                if (pressedChanges.size < 2) continue
+                                                pinchPointerIds = pressedChanges.take(2).map { it.id }
+                                                initialDistance = pinchPointerIds.let { ids ->
+                                                    val first = event.changes.first { it.id == ids[0] }.position
+                                                    val second = event.changes.first { it.id == ids[1] }.position
+                                                    (first - second).getDistance()
+                                                }
+                                                initialScale = effectiveTranscriptTextScale.floatValue
+                                                event.changes.forEach { change ->
+                                                    if (change.positionChanged()) change.consume()
+                                                }
+                                                continue
+                                            }
+
+                                            val ids = pinchPointerIds
+                                            val activeChanges = event.changes.filter { it.id in ids && it.pressed }
+                                            if (activeChanges.size < 2) break
+                                            val distance = (activeChanges[0].position - activeChanges[1].position).getDistance()
+                                            if (initialDistance > 0f && distance > 0f) {
+                                                val normalizedScale = normalizeTranscriptTextScale(
+                                                    initialScale * distance / initialDistance,
+                                                )
+                                                finalScale = normalizedScale
+                                                effectiveTranscriptTextScale.floatValue = normalizedScale
+                                            }
+                                            event.changes.forEach { change ->
+                                                if (change.positionChanged()) change.consume()
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    finalScale?.let { scale ->
+                                        withContext(NonCancellable) {
+                                            currentLocalSettingsRepository?.setTranscriptTextScale(scale)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         .testTag("chat_transcript")
                         .hermexHazeSource(key = "chat-transcript"),
                     state = transcriptListState,
@@ -956,6 +1017,7 @@ fun ChatRoute(
                                     showsResponseSpeed = chatDisplaySettings.showsResponseSpeed,
                                     wrapsCodeBlockLines = chatDisplaySettings.wrapsCodeBlockLines,
                                     streamedTextAnimationEnabled = chatDisplaySettings.streamedTextAnimationEnabled,
+                                    transcriptTextScale = effectiveTranscriptTextScale.floatValue,
                                     loadTranscriptMediaImage = viewModel::transcriptMediaThumbnailData,
                                     loadAttachmentFile = viewModel::attachmentTextFile,
                                     actionContext = actionContext,
@@ -3784,6 +3846,7 @@ private fun MessageRow(
     showsResponseSpeed: Boolean,
     wrapsCodeBlockLines: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
     loadTranscriptMediaImage: suspend (TranscriptMediaReference) -> ByteArray?,
     loadAttachmentFile: suspend (String) -> FileResponse?,
     actionContext: MessageActionContext?,
@@ -3833,6 +3896,7 @@ private fun MessageRow(
                 if (visibleText.isNotBlank() || attachments.isEmpty()) {
                     UserMessageBubble(
                         text = visibleText.ifBlank { "(empty)" },
+                        transcriptTextScale = transcriptTextScale,
                         onShowActions = { showsMessageActions = true },
                     )
                 }
@@ -3869,6 +3933,7 @@ private fun MessageRow(
             showsResponseSpeed = showsResponseSpeed,
             wrapsCodeBlockLines = wrapsCodeBlockLines,
             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+            transcriptTextScale = transcriptTextScale,
             linkPreviewUrl = linkPreviewUrl,
             loadTranscriptMediaImage = loadTranscriptMediaImage,
             onPreviewAttachment = { previewAttachment = it },
@@ -4117,6 +4182,7 @@ private fun AssistantMessageRow(
     showsResponseSpeed: Boolean,
     wrapsCodeBlockLines: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
     linkPreviewUrl: HttpUrl?,
     loadTranscriptMediaImage: suspend (TranscriptMediaReference) -> ByteArray?,
     onPreviewAttachment: (MessageAttachment) -> Unit,
@@ -4167,6 +4233,7 @@ private fun AssistantMessageRow(
                     wrapsCodeBlockLines = wrapsCodeBlockLines,
                     isStreaming = isStreamingMessage,
                     streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                    transcriptTextScale = transcriptTextScale,
                 )
             } else {
                 MarkdownText(
@@ -4174,10 +4241,14 @@ private fun AssistantMessageRow(
                     wrapsCodeBlockLines = wrapsCodeBlockLines,
                     isStreaming = isStreamingMessage,
                     streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                    transcriptTextScale = transcriptTextScale,
                 )
             }
         } else if (attachments.isEmpty() && reasoningTexts.isEmpty() && tools.isEmpty()) {
-            MarkdownText("(empty)")
+            MarkdownText(
+                markdown = "(empty)",
+                transcriptTextScale = transcriptTextScale,
+            )
         }
         linkPreviewUrl?.let { url ->
             TranscriptLinkPreviewCard(url = url)
@@ -4201,6 +4272,7 @@ private fun TranscriptMediaContentView(
     wrapsCodeBlockLines: Boolean,
     isStreaming: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEach { segment ->
@@ -4212,6 +4284,7 @@ private fun TranscriptMediaContentView(
                             wrapsCodeBlockLines = wrapsCodeBlockLines,
                             isStreaming = isStreaming,
                             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                            transcriptTextScale = transcriptTextScale,
                         )
                     }
                 }
@@ -5794,9 +5867,14 @@ private fun Modifier.messageActionsGesture(
 @Composable
 private fun UserMessageBubble(
     text: String,
+    transcriptTextScale: Float,
     onShowActions: () -> Unit,
 ) {
     val bubbleShape = RoundedCornerShape(20.dp)
+    val userMessageStyle = MaterialTheme.typography.bodyLarge.copy(
+        fontSize = MaterialTheme.typography.bodyLarge.fontSize * transcriptTextScale,
+        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * transcriptTextScale,
+    )
     Column(
         modifier = Modifier
             .widthIn(max = 520.dp)
@@ -5813,7 +5891,7 @@ private fun UserMessageBubble(
         SelectionContainer {
             Text(
                 text,
-                style = MaterialTheme.typography.bodyLarge,
+                style = userMessageStyle,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }

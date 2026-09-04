@@ -5,6 +5,7 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.uzairansar.hermex.core.model.ModelSummary
@@ -49,7 +50,18 @@ data class ChatDisplaySettings(
     val showsResponseSpeed: Boolean = false,
     val showsChatFilesButton: Boolean = true,
     val showsChatGitControls: Boolean = true,
+    val transcriptTextScale: Float = DEFAULT_TRANSCRIPT_TEXT_SCALE,
 )
+
+internal const val DEFAULT_TRANSCRIPT_TEXT_SCALE = 1.0f
+internal const val MIN_TRANSCRIPT_TEXT_SCALE = 0.85f
+internal const val MAX_TRANSCRIPT_TEXT_SCALE = 2.0f
+
+internal fun normalizeTranscriptTextScale(scale: Float): Float =
+    if (scale.isNaN()) DEFAULT_TRANSCRIPT_TEXT_SCALE else scale.coerceIn(
+        MIN_TRANSCRIPT_TEXT_SCALE,
+        MAX_TRANSCRIPT_TEXT_SCALE,
+    )
 
 data class SessionRowDisplaySettings(
     val showMessageCount: Boolean = true,
@@ -121,6 +133,9 @@ class LocalSettingsRepository(context: Context) {
             showsResponseSpeed = preferences[SHOWS_RESPONSE_SPEED] ?: false,
             showsChatFilesButton = preferences[SHOWS_CHAT_FILES_BUTTON] ?: true,
             showsChatGitControls = preferences[SHOWS_CHAT_GIT_CONTROLS] ?: true,
+            transcriptTextScale = normalizeTranscriptTextScale(
+                preferences[TRANSCRIPT_TEXT_SCALE] ?: DEFAULT_TRANSCRIPT_TEXT_SCALE,
+            ),
         )
     }
 
@@ -329,6 +344,12 @@ class LocalSettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setTranscriptTextScale(scale: Float) {
+        dataStore.edit { preferences ->
+            preferences[TRANSCRIPT_TEXT_SCALE] = normalizeTranscriptTextScale(scale)
+        }
+    }
+
     suspend fun setSessionRowShowMessageCount(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[SESSION_ROW_SHOW_MESSAGE_COUNT] = enabled
@@ -450,6 +471,7 @@ class LocalSettingsRepository(context: Context) {
         val SHOWS_RESPONSE_SPEED = booleanPreferencesKey("chatTranscript.showsResponseSpeed")
         val SHOWS_CHAT_FILES_BUTTON = booleanPreferencesKey("chatToolbar.showsFilesButton")
         val SHOWS_CHAT_GIT_CONTROLS = booleanPreferencesKey("chatToolbar.showsGitControls")
+        val TRANSCRIPT_TEXT_SCALE = floatPreferencesKey("chatTranscript.transcriptTextScale")
         val SESSION_ROW_SHOW_MESSAGE_COUNT = booleanPreferencesKey("sessionRow.showMessageCount")
         val SESSION_ROW_SHOW_WORKSPACE = booleanPreferencesKey("sessionRow.showWorkspace")
         val SESSION_ROW_SHOW_CRON_SESSIONS = booleanPreferencesKey("sessionRow.showCronSessions")
