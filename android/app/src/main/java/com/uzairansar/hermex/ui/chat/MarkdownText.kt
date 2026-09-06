@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.Uri
 import android.text.Spannable
 import android.text.SpannableStringBuilder
@@ -47,14 +48,16 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat
+import com.uzairansar.hermex.R
 import com.uzairansar.hermex.ui.localization.localizedString
+import com.uzairansar.hermex.ui.theme.JetBrainsMonoFontFamily
 import io.noties.markwon.AbstractMarkwonPlugin
 import io.noties.markwon.LinkResolver
 import io.noties.markwon.Markwon
@@ -285,7 +288,19 @@ private fun MarkdownAndroidView(
     val dividerColor = colorScheme.outlineVariant.toArgb()
     val isDarkTheme = colorScheme.background.luminance() < 0.5f
     val latexTextSizePx = with(LocalDensity.current) { (15.sp * transcriptTextScale).toPx() }
-    val markwon = remember(context, textColor, linkColor, codeBackground, dividerColor, isDarkTheme, latexTextSizePx) {
+    val jetBrainsMonoTypeface = remember(context) {
+        ResourcesCompat.getFont(context, R.font.jetbrains_mono) ?: Typeface.MONOSPACE
+    }
+    val markwon = remember(
+        context,
+        textColor,
+        linkColor,
+        codeBackground,
+        dividerColor,
+        isDarkTheme,
+        latexTextSizePx,
+        jetBrainsMonoTypeface,
+    ) {
         try {
             MarkdownRendererCache.get(
                 context = context.applicationContext,
@@ -294,6 +309,7 @@ private fun MarkdownAndroidView(
                 dividerColor = dividerColor,
                 isDarkTheme = isDarkTheme,
                 latexTextSizePx = latexTextSizePx,
+                typeface = jetBrainsMonoTypeface,
             )
         } catch (_: Exception) {
             null
@@ -336,6 +352,7 @@ private fun MarkdownAndroidView(
         factory = {
             TextView(it).apply {
                 textSize = 15f * transcriptTextScale
+                setTypeface(jetBrainsMonoTypeface, Typeface.NORMAL)
                 setTextColor(textColor)
                 setLinkTextColor(linkColor)
                 setTextIsSelectable(true)
@@ -345,6 +362,7 @@ private fun MarkdownAndroidView(
         },
         update = { textView ->
             textView.textSize = 15f * transcriptTextScale
+            textView.setTypeface(jetBrainsMonoTypeface, Typeface.NORMAL)
             textView.setTextColor(textColor)
             textView.setLinkTextColor(linkColor)
             textView.setHorizontallyScrolling(false)
@@ -462,6 +480,7 @@ private object MarkdownRendererCache {
         dividerColor: Int,
         isDarkTheme: Boolean,
         latexTextSizePx: Float,
+        typeface: Typeface,
     ): Markwon {
         val key = RendererKey(
             context = context,
@@ -493,8 +512,10 @@ private object MarkdownRendererCache {
                             builder
                                 .codeTextColor(textColor)
                                 .codeBackgroundColor(codeBackground)
+                                .codeTypeface(typeface)
                                 .codeBlockTextColor(textColor)
                                 .codeBlockBackgroundColor(codeBackground)
+                                .codeBlockTypeface(typeface)
                                 .blockMargin(16)
                                 .headingBreakHeight(0)
                                 .thematicBreakColor(dividerColor)
@@ -606,7 +627,7 @@ private fun CodeText(
         text = content.ifEmpty { " " },
         modifier = modifier,
         style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = JetBrainsMonoFontFamily,
             fontSize = MaterialTheme.typography.bodySmall.fontSize * transcriptTextScale,
             lineHeight = 18.sp * transcriptTextScale,
         ),

@@ -100,6 +100,8 @@ import com.uzairansar.hermex.data.repository.AuthState
 import com.uzairansar.hermex.data.repository.CacheMaintenanceRepository
 import com.uzairansar.hermex.data.repository.PanelsRepository
 import com.uzairansar.hermex.data.secure.ServerAccount
+import com.uzairansar.hermex.data.update.AppUpdateSource
+import com.uzairansar.hermex.data.update.AppUpdateUiState
 import com.uzairansar.hermex.ui.theme.HermexCardShape
 import com.uzairansar.hermex.ui.theme.HermexGlassShape
 import com.uzairansar.hermex.ui.theme.HermexIconButton
@@ -120,6 +122,7 @@ fun SettingsRoute(
     localSettingsRepository: LocalSettingsRepository,
     cacheMaintenanceRepository: CacheMaintenanceRepository? = null,
     panelsRepository: PanelsRepository?,
+    appUpdateSource: AppUpdateSource,
     authState: AuthState,
     onBack: () -> Unit,
     onOpenArchivedSessions: () -> Unit = {},
@@ -131,7 +134,7 @@ fun SettingsRoute(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return SettingsViewModel(authRepository, localSettingsRepository, cacheMaintenanceRepository, panelsRepository) as T
+                return SettingsViewModel(authRepository, localSettingsRepository, cacheMaintenanceRepository, panelsRepository, appUpdateSource) as T
             }
 
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
@@ -141,6 +144,7 @@ fun SettingsRoute(
                     localSettingsRepository,
                     cacheMaintenanceRepository,
                     panelsRepository,
+                    appUpdateSource,
                     extras.createSavedStateHandle(),
                 ) as T
             }
@@ -634,6 +638,25 @@ fun SettingsRoute(
                 SettingsSection(title = "App") {
                     SettingsInfoRow(localizedString("Version"), appInfo.version)
                     SettingsInfoRow(localizedString("Build"), appInfo.build)
+                    SettingsActionRow(
+                        label = localizedString("Check for app updates"),
+                        value = when (val updateState = state.appUpdateState) {
+                            AppUpdateUiState.NotChecked -> "Check GitHub releases"
+                            AppUpdateUiState.Checking -> "Checking..."
+                            AppUpdateUiState.UpToDate -> "Hermex is up to date"
+                            is AppUpdateUiState.UpdateAvailable -> "Hermex ${updateState.metadata.versionName} is available"
+                            is AppUpdateUiState.Error -> updateState.message
+                        },
+                        onClick = viewModel::checkForAppUpdates,
+                    )
+                    (state.appUpdateState as? AppUpdateUiState.UpdateAvailable)?.let { available ->
+                        SettingsActionRow(
+                            label = localizedString("Download update"),
+                            value = "Open direct APK in browser",
+                            onClick = { openExternalUrl(context, available.metadata.apkUrl) },
+                        )
+                        SettingsFootnote("Your browser downloads the APK. Android asks you before installation; Hermex never downloads or installs it silently.")
+                    }
                     SettingsActionRow(
                         label = localizedString("Privacy Policy"),
                         value = "Open in browser",

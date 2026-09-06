@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"拒絕"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"詳細資料"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"捨棄"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"在瀏覽器下載 APK，然後點按以安裝。Hermex 絕不會在未經提示下安裝更新。"</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"下載更新"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"檔案變更"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"篩選條件"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex ??????????????????????????????? Cookie ??????"</string>

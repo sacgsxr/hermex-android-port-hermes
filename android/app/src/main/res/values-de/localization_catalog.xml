@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Ablehnen"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Details"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Verwerfen"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Lade die APK im Browser herunter und tippe sie dann zur Installation an. Hermex installiert Updates niemals unbemerkt."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Update herunterladen"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"Dateiänderungen"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filter"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex konnte die verschl?sselten Kontodaten nicht ?ffnen. Beim Zur?cksetzen werden gespeicherte Server, Anmelde-Cookies und benutzerdefinierte Header von diesem Ger?t entfernt."</string>

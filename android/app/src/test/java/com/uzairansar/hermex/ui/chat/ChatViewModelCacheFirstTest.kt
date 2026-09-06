@@ -25,6 +25,7 @@ import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -102,6 +103,49 @@ class ChatViewModelCacheFirstTest {
             assertFalse(freshState.isLoading)
             assertEquals("50", sessionRequest.get()?.url?.queryParameter("msg_limit"))
             assertNull(sessionRequest.get()?.url?.queryParameter("expand_renderable"))
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun unavailableProvidersDoNotBreakComposerConfiguration() = runTest {
+        val server = MockWebServer()
+        try {
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                    "/api/session" -> json("""{"session":{"session_id":"session-1","messages":[]}}""")
+                    "/api/models" -> json("""{"models":[{"id":"gpt-5","label":"GPT-5","provider":"openai"}]}""")
+                    "/api/providers" -> MockResponse.Builder().code(503).body("""{"error":"unavailable"}""").build()
+                    "/api/profiles" -> json("""{"profiles":[]}""")
+                    "/api/workspaces" -> json("""{"workspaces":[]}""")
+                    "/api/reasoning" -> json("""{"supported_efforts":[]}""")
+                    "/api/commands" -> json("""{"commands":[]}""")
+                    "/api/skills" -> json("""{"skills":[]}""")
+                    "/api/session/yolo" -> json("""{"yolo_enabled":false}""")
+                    else -> MockResponse.Builder().code(404).body("""{"error":"unexpected"}""").build()
+                }
+            }
+            server.start()
+            val client = HermesApiClient(server.url("/"), OkHttpClient())
+            val repository = ChatRepository(
+                client = client,
+                cacheDao = RecordingCacheDao(),
+                cacheOwnership = ServerCacheOwnership(),
+                sse = SseStreamClient(server.url("/"), OkHttpClient()) { emptyList() },
+            )
+            val viewModel = ChatViewModel("session-1", repository)
+
+            val state = withContext(Dispatchers.Default) {
+                withTimeout(5_000) {
+                    viewModel.state.first { composer ->
+                        !composer.isLoadingComposerConfig && composer.modelOptions.isNotEmpty()
+                    }
+                }
+            }
+
+            assertEquals("GPT-5", state.selectedModel?.label)
+            assertTrue(state.providerSummaries.isEmpty())
         } finally {
             server.close()
         }

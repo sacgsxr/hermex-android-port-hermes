@@ -18,6 +18,7 @@ import com.uzairansar.hermex.core.model.PersonalitySummary
 import com.uzairansar.hermex.core.model.ProfilesResponse
 import com.uzairansar.hermex.core.model.ProfileSwitchResponse
 import com.uzairansar.hermex.core.model.ProfileSummary
+import com.uzairansar.hermex.core.model.ProviderSummary
 import com.uzairansar.hermex.core.model.ReasoningResponse
 import com.uzairansar.hermex.core.model.SessionDetail
 import com.uzairansar.hermex.core.model.SessionMutationResponse
@@ -330,6 +331,7 @@ class ChatRepository(
     suspend fun synthesizeSpeech(text: String, voice: String = "en-US-AriaNeural"): ByteArray =
         client.synthesizeSpeech(text, voice)
     suspend fun models(): List<ModelSummary> = client.models().flattenedModels
+    suspend fun providers(): List<ProviderSummary> = client.providers().providers.orEmpty()
     suspend fun commands() = client.commands().commands.orEmpty()
     suspend fun profilesResponse(): ProfilesResponse = client.profiles()
     suspend fun profiles(): List<ProfileSummary> = client.profiles().profiles.orEmpty()

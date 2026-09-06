@@ -524,6 +524,7 @@ fun HermexApp(
                         localSettingsRepository = container.localSettingsRepository,
                         cacheMaintenanceRepository = container.cacheMaintenanceRepository,
                         panelsRepository = server?.let { container.panelsRepository(it) },
+                        appUpdateSource = container.appUpdateChecker,
                         authState = authState,
                         onBack = { navController.popBackStack() },
                         onOpenArchivedSessions = { navController.navigateSingleTop("sessions?showArchived=true") },

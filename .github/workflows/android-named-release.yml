@@ -12,9 +12,9 @@ on:
         required: true
         type: string
       prerelease:
-        description: "Publish as a prerelease"
+        description: "Publish as a prerelease (prereleases are excluded from the app updater's /releases/latest channel)"
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -183,7 +183,26 @@ jobs:
           mkdir -p "$release_dir"
           cp "$apk_path" "$release_dir/app-release.apk"
           cp "$aab_path" "$release_dir/app-release.aab"
-          (cd "$release_dir" && sha256sum app-release.apk app-release.aab > SHA256SUMS.txt)
+          apk_sha256="$(sha256sum "$release_dir/app-release.apk" | cut -d ' ' -f1)"
+          export RELEASE_JSON_PATH="$release_dir/release.json"
+          export RELEASE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ inputs.tag_name }}/app-release.apk"
+          export RELEASE_APK_SHA256="$apk_sha256"
+          python3 - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "versionCode": int(os.environ["ANDROID_VERSION_CODE"]),
+              "versionName": os.environ["ANDROID_VERSION_NAME"],
+              "packageName": "com.uzairansar.hermex",
+              "apkUrl": os.environ["RELEASE_APK_URL"],
+              "sha256": os.environ["RELEASE_APK_SHA256"],
+          }
+          with open(os.environ["RELEASE_JSON_PATH"], "w", encoding="utf-8") as output:
+              json.dump(payload, output, indent=2)
+              output.write("\n")
+          PY
+          (cd "$release_dir" && sha256sum app-release.apk app-release.aab release.json > SHA256SUMS.txt)
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v5

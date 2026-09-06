@@ -23,6 +23,9 @@ import com.uzairansar.hermex.data.repository.PanelsRepository
 import com.uzairansar.hermex.data.repository.ResultState
 import com.uzairansar.hermex.data.repository.SessionPage
 import com.uzairansar.hermex.data.repository.SessionRepository
+import com.uzairansar.hermex.data.update.AppUpdateSource
+import com.uzairansar.hermex.data.update.AppUpdateUiState
+import com.uzairansar.hermex.data.update.toUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -123,6 +126,8 @@ data class SessionListUiState(
     val isLoading: Boolean = false,
     val isMutating: Boolean = false,
     val isViewingCachedData: Boolean = false,
+    val appUpdateState: AppUpdateUiState = AppUpdateUiState.NotChecked,
+    val isAppUpdateBannerDismissed: Boolean = false,
     val notice: String? = null,
     val error: String? = null,
 ) {
@@ -245,6 +250,7 @@ class SessionListViewModel(
     private val repository: SessionRepository,
     private val panelsRepository: PanelsRepository,
     private val localSettingsRepository: LocalSettingsRepository,
+    private val appUpdateSource: AppUpdateSource,
     private val serverId: String,
     private val savedStateHandle: SavedStateHandle? = null,
 ) : ViewModel() {
@@ -257,6 +263,7 @@ class SessionListViewModel(
     private var refreshJob: Job? = null
     private var remoteSearchJob: Job? = null
     private var profilesJob: Job? = null
+    private var appUpdateJob: Job? = null
     private var profilesGeneration = 0L
     private var hasEnteredComposition = false
 
@@ -372,6 +379,30 @@ class SessionListViewModel(
     fun refreshAll() {
         refresh()
         refreshProfiles()
+        checkForAppUpdate()
+    }
+
+    private fun checkForAppUpdate() {
+        appUpdateJob?.cancel()
+        appUpdateJob = viewModelScope.launch {
+            runSuspendCatching { appUpdateSource.check() }
+                .onSuccess { result ->
+                    _state.update {
+                        it.copy(
+                            appUpdateState = result.toUiState(),
+                            isAppUpdateBannerDismissed = false,
+                        )
+                    }
+                }
+                .onFailure {
+                    // App-update availability is auxiliary; chat refresh errors remain independent.
+                    _state.update { it.copy(appUpdateState = AppUpdateUiState.Error("Could not check for app updates.")) }
+                }
+        }
+    }
+
+    fun dismissAppUpdateBanner() {
+        _state.update { it.copy(isAppUpdateBannerDismissed = true) }
     }
 
     fun refreshAllOnVisible() {

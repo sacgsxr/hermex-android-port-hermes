@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Weigeren"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Details"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Verwerpen"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Download de APK in je browser en tik erop om deze te installeren. Hermex installeert updates nooit stilletjes."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Update downloaden"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"Bestandswijzigingen"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filters"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex kon de versleutelde accountgegevens niet openen. Bij opnieuw instellen worden opgeslagen servers, aanmeldcookies en aangepaste headers van dit apparaat verwijderd."</string>

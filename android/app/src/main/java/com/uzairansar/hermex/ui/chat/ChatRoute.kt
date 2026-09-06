@@ -31,7 +31,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -49,7 +48,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -154,6 +152,7 @@ import com.uzairansar.hermex.core.model.ModelSummary
 import com.uzairansar.hermex.core.model.PendingApproval
 import com.uzairansar.hermex.core.model.PendingClarification
 import com.uzairansar.hermex.core.model.ProfileSummary
+import com.uzairansar.hermex.core.model.ProviderSummary
 import com.uzairansar.hermex.core.model.ToolCall
 import com.uzairansar.hermex.core.model.ToolCallGroup
 import com.uzairansar.hermex.core.model.TranscriptMediaParser
@@ -190,6 +189,7 @@ import com.uzairansar.hermex.ui.theme.HermexCardShape
 import com.uzairansar.hermex.ui.theme.HermexGlassShape
 import com.uzairansar.hermex.ui.theme.HermexIconButton
 import com.uzairansar.hermex.ui.theme.HermexPillButton
+import com.uzairansar.hermex.ui.theme.HermexPillShape
 import com.uzairansar.hermex.ui.theme.HermexSelectorPill
 import com.uzairansar.hermex.ui.theme.HermexSurfaceLevel
 import com.uzairansar.hermex.ui.theme.LocalHermexHapticsEnabled
@@ -535,7 +535,6 @@ fun ChatRoute(
     }
     var showsModelPicker by rememberSaveable { mutableStateOf(false) }
     var showsProfilePicker by rememberSaveable { mutableStateOf(false) }
-    var showsReasoningPicker by rememberSaveable { mutableStateOf(false) }
     var showsWorkspacePicker by rememberSaveable { mutableStateOf(false) }
     var showsWorkspaceManager by rememberSaveable { mutableStateOf(false) }
     var showsAttachmentOptions by rememberSaveable { mutableStateOf(false) }
@@ -721,11 +720,6 @@ fun ChatRoute(
         }
     }
 
-    LaunchedEffect(state.showsReasoningControl) {
-        if (!state.showsReasoningControl) {
-            showsReasoningPicker = false
-        }
-    }
     LaunchedEffect(state.showsProfileControl) {
         if (!state.showsProfileControl) {
             showsProfilePicker = false
@@ -1185,7 +1179,6 @@ fun ChatRoute(
                             onCancel = viewModel::cancel,
                             onOpenModelPicker = { showsModelPicker = true },
                             onOpenProfilePicker = { showsProfilePicker = true },
-                            onOpenReasoningPicker = { showsReasoningPicker = true },
                             onOpenWorkspacePicker = { showsWorkspacePicker = true },
                             onLoadWorkspaceSuggestions = viewModel::loadWorkspaceSuggestions,
                             onAttach = { showsAttachmentOptions = true },
@@ -1321,6 +1314,10 @@ fun ChatRoute(
         ModelPickerDialog(
             models = state.modelOptions,
             selected = state.selectedModel,
+            providers = state.providerSummaries,
+            reasoningEfforts = state.reasoningOptions,
+            selectedReasoning = state.selectedReasoning,
+            showsReasoning = state.showsReasoningControl,
             favoriteKeys = favoriteModelKeys,
             recentKeys = recentModelKeys,
             onDismiss = { showsModelPicker = false },
@@ -1342,6 +1339,10 @@ fun ChatRoute(
                     localSettingsRepository?.removeRecentModel(model)
                 }
             },
+            onSelectReasoning = { effort ->
+                showsModelPicker = false
+                viewModel.selectReasoning(effort)
+            },
         )
     }
     if (showsProfilePicker && state.showsProfileControl) {
@@ -1362,17 +1363,7 @@ fun ChatRoute(
             onConfirm = viewModel::confirmProfileSwitchStartingNewSession,
         )
     }
-    if (showsReasoningPicker && state.showsReasoningControl) {
-        ReasoningPickerDialog(
-            efforts = state.reasoningOptions,
-            selected = state.selectedReasoning,
-            onDismiss = { showsReasoningPicker = false },
-            onSelect = { effort ->
-                showsReasoningPicker = false
-                viewModel.selectReasoning(effort)
-            },
-        )
-    }
+
     if (showsWorkspacePicker) {
         WorkspacePickerDialog(
             roots = state.workspaceRoots,
@@ -2242,7 +2233,6 @@ private fun ComposerSurface(
     onCancel: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
-    onOpenReasoningPicker: () -> Unit,
     onOpenWorkspacePicker: () -> Unit,
     onLoadWorkspaceSuggestions: (String) -> Unit,
     onAttach: () -> Unit,
@@ -2258,7 +2248,6 @@ private fun ComposerSurface(
     val messageDescription = localizedString("message").replaceFirstChar { character ->
         if (character.isLowerCase()) character.titlecase() else character.toString()
     }
-    val isImeVisible = WindowInsets.isImeVisible
     val slashAutocompleteContext = remember(
         state.modelOptions,
         state.profileOptions,
@@ -2317,6 +2306,17 @@ private fun ComposerSurface(
                     surfaceLevel = HermexSurfaceLevel.Floating,
                 ),
         ) {
+            ComposerModelSelector(
+                model = state.selectedModel,
+                location = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries),
+                onClick = onOpenModelPicker,
+                enabled = (state.selectedModel != null || state.modelOptions.isNotEmpty()) &&
+                    !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+            )
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
             if (state.pendingAttachments.isNotEmpty()) {
                 ComposerAttachmentStrip(
                     attachments = state.pendingAttachments,
@@ -2372,34 +2372,22 @@ private fun ComposerSurface(
                     onClick = onAttach,
                     enabled = !state.isUploadingAttachment && !state.isStreaming && !state.isViewingCachedData,
                 )
-                HermexSelectorPill(
-                    label = state.selectedModel?.label ?: state.selectedModel?.name ?: state.selectedModel?.id ?: "Model",
-                    onClick = onOpenModelPicker,
-                    enabled = (state.selectedModel != null || state.modelOptions.isNotEmpty()) &&
-                        !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                    modifier = Modifier.weight(1f),
-                    glassed = false,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
-                )
-                if (state.showsReasoningControl) {
-                    HermexSelectorPill(
-                        label = ReasoningEffortOption.titleFor(state.selectedReasoning),
-                        onClick = onOpenReasoningPicker,
-                        enabled = state.reasoningOptions.isNotEmpty() && !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                        leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_brain,
-                        minWidth = 84.dp,
-                        maxWidth = 100.dp,
-                        glassed = false,
-                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 10.dp),
-                    )
-                }
                 ComposerInlineIconButton(
-                    label = localizedString("Voice dictation. Long press to record a voice note."),
+                    label = localizedString("Dictate"),
                     iconRes = com.uzairansar.hermex.R.drawable.ic_hermex_mic,
                     onClick = onVoiceDictation,
-                    onLongClick = onVoiceNote,
                     enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRecordingVoiceNote && !state.isTranscribingVoiceNote && !state.isRunningSessionAction,
                 )
+                HermexIconButton(
+                    label = localizedString("Voice note"),
+                    symbol = "♪",
+                    onClick = onVoiceNote,
+                    enabled = !state.isStreaming && !state.isViewingCachedData &&
+                        !state.isRecordingVoiceNote && !state.isTranscribingVoiceNote &&
+                        !isVoiceDictating && !isVoiceDictationTranscribing && !state.isRunningSessionAction,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(Modifier.weight(1f))
                 HermexIconButton(
                     label = localizedString(if (state.isStreaming) "Stop" else "Send"),
                     symbol = if (state.isStreaming) "■" else "↑",
@@ -2445,7 +2433,7 @@ private fun ComposerSurface(
                 }
             }
         }
-        if (!isImeVisible && showSecondaryBar) {
+        if (showSecondaryBar) {
             ComposerSecondaryBar(
                 state = state,
                 onOpenWorkspacePicker = onOpenWorkspacePicker,
@@ -2463,13 +2451,11 @@ private fun ComposerSurface(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerInlineIconButton(
     label: String,
     iconRes: Int,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
     enabled: Boolean,
 ) {
     Image(
@@ -2478,21 +2464,69 @@ private fun ComposerInlineIconButton(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .then(
-                if (onLongClick == null) {
-                    Modifier.clickable(enabled = enabled, onClick = onClick)
-                } else {
-                    Modifier.combinedClickable(
-                        enabled = enabled,
-                        onClick = onClick,
-                        onLongClick = onLongClick,
-                    )
-                },
-            )
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(9.dp),
         colorFilter = ColorFilter.tint(
             MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.82f else 0.34f),
         ),
+    )
+}
+
+@Composable
+private fun ComposerModelSelector(
+    model: ModelSummary?,
+    location: ModelExecutionLocation,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    val title = model?.displayModelTitle?.takeIf { it.isNotBlank() } ?: localizedString("Choose Model")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Model: $title, ${location.label}"
+            }
+            .testTag("chat_model_selector")
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                localizedString("Model"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        ModelExecutionBadge(location)
+        Text(
+            "⌄",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+@Composable
+private fun ModelExecutionBadge(location: ModelExecutionLocation) {
+    Text(
+        location.label,
+        modifier = Modifier
+            .clip(HermexPillShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
     )
 }
 
@@ -2614,6 +2648,15 @@ private fun ComposerSecondaryBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (showsProfile) {
+            HermexSelectorPill(
+                label = state.profileTitle,
+                onClick = onOpenProfilePicker,
+                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
         if (showsWorkspace) {
             HermexSelectorPill(
                 label = state.workspaceTitle,
@@ -2622,15 +2665,6 @@ private fun ComposerSecondaryBar(
                 leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_folder,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 modifier = Modifier.testTag("chat_workspace_picker"),
-            )
-        }
-        if (showsProfile) {
-            HermexSelectorPill(
-                label = state.profileTitle,
-                onClick = onOpenProfilePicker,
-                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             )
         }
         contextSnapshot?.let {
@@ -2907,12 +2941,17 @@ private fun AttachmentOptionsSheet(
 private fun ModelPickerDialog(
     models: List<ModelSummary>,
     selected: ModelSummary?,
+    providers: List<ProviderSummary>,
+    reasoningEfforts: List<String>,
+    selectedReasoning: String?,
+    showsReasoning: Boolean,
     favoriteKeys: List<ModelFavoriteKey>,
     recentKeys: List<ModelFavoriteKey>,
     onDismiss: () -> Unit,
     onSelect: (ModelSummary) -> Unit,
     onToggleFavorite: (ModelSummary) -> Unit,
     onDeleteSavedCustom: (ModelSummary) -> Unit,
+    onSelectReasoning: (String) -> Unit,
 ) {
     var searchText by rememberSaveable { mutableStateOf("") }
     var customModelId by rememberSaveable { mutableStateOf("") }
@@ -2974,6 +3013,38 @@ private fun ModelPickerDialog(
                 shape = HermexCardShape,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (showsReasoning) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Text(
+                        localizedString("Reasoning"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        reasoningEfforts.forEach { effort ->
+                            HermexPillButton(
+                                label = localizedString(ReasoningEffortOption.titleFor(effort)),
+                                onClick = { onSelectReasoning(effort) },
+                                enabled = effort != selectedReasoning,
+                                filled = effort == selectedReasoning,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3040,6 +3111,7 @@ private fun ModelPickerDialog(
                                 ) { model ->
                                     ModelOptionRow(
                                         model = model,
+                                        location = ModelExecutionLocationResolver.resolve(model, providers),
                                         selected = model.matchesSelection(selected),
                                         isFavorite = model.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
                                         allowsDelete = group.allowsDelete,
@@ -3186,6 +3258,7 @@ private fun ModelGroupHeader(
 @Composable
 private fun ModelOptionRow(
     model: ModelSummary,
+    location: ModelExecutionLocation,
     selected: Boolean,
     isFavorite: Boolean,
     allowsDelete: Boolean,
@@ -3235,14 +3308,21 @@ private fun ModelOptionRow(
                     )
                 }
                 model.normalizedProvider?.let { provider ->
-                    Text(
-                        provider,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.MiddleEllipsis,
-                    )
-                }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            provider,
+                            modifier = Modifier.weight(1f, fill = false),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.MiddleEllipsis,
+                        )
+                        ModelExecutionBadge(location)
+                    }
+                } ?: ModelExecutionBadge(location)
             }
         }
         TextButton(

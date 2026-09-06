@@ -24,6 +24,7 @@ import com.uzairansar.hermex.core.model.PendingClarification
 import com.uzairansar.hermex.core.model.PersonalitySummary
 import com.uzairansar.hermex.core.model.ProfileSummary
 import com.uzairansar.hermex.core.model.ProfilesResponse
+import com.uzairansar.hermex.core.model.ProviderSummary
 import com.uzairansar.hermex.core.model.SessionStatusResponse
 import com.uzairansar.hermex.core.model.SkillSummary
 import com.uzairansar.hermex.core.model.ToolCallGroup
@@ -258,6 +259,7 @@ internal fun copyAttachmentWithLimit(
 
 private data class ComposerConfig(
     val models: List<ModelSummary>,
+    val providers: List<ProviderSummary>,
     val profiles: ProfilesResponse,
     val workspaces: WorkspacesResponse,
     val skillSuggestions: List<SlashSkillSuggestion>,
@@ -279,6 +281,7 @@ data class ChatUiState(
     val completedToolCallGroups: List<ToolCallGroup> = emptyList(),
     val draft: String = "",
     val modelOptions: List<ModelSummary> = emptyList(),
+    val providerSummaries: List<ProviderSummary> = emptyList(),
     val agentCommands: List<AgentCommand> = emptyList(),
     val profileOptions: List<ProfileSummary> = emptyList(),
     val reasoningOptions: List<String> = ReasoningEffortOption.optionsForSupportedEfforts(null).map { it.id },
@@ -648,6 +651,15 @@ class ChatViewModel internal constructor(
             runSuspendCatching {
                 coroutineScope {
                     val models = async { repository.models() }
+                    val providers = async {
+                        try {
+                            repository.providers()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
                     val profiles = async { repository.profilesResponse() }
                     val workspaces = async { repository.workspaces() }
                     val skills = async {
@@ -673,6 +685,7 @@ class ChatViewModel internal constructor(
                     )
                     ComposerConfig(
                         models = models.await(),
+                        providers = providers.await(),
                         profiles = profiles.await(),
                         workspaces = workspaces.await(),
                         skillSuggestions = skillSuggestions,
@@ -692,6 +705,7 @@ class ChatViewModel internal constructor(
                     )
                     it.copy(
                         modelOptions = config.models,
+                        providerSummaries = config.providers,
                         agentCommands = config.agentCommands,
                         profileOptions = profileOptions,
                         activeProfileName = activeProfileName,

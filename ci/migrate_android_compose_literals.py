@@ -48,7 +48,7 @@ LOCALIZABLE_CALLS = (
 NAMED_TEXT_ARGUMENTS = ("text", "label", "title", "message", "description", "contentDescription")
 ALLOWED_UNLOCALIZED_LITERALS = {
     "!", "#FFD700", "+", "-", "100.64.0.1:8787", ">", "CF-Access-Client-Id: ...",
-    "IMG", "REMOTE\nHTTP blocked", "REMOTE\nTap to load", "X", "doc", "●", "✎", "✓", "✦",
+    "IMG", "REMOTE\nHTTP blocked", "REMOTE\nTap to load", "X", "doc", "●", "✎", "✓", "✦", "⌄",
 }
 
 
