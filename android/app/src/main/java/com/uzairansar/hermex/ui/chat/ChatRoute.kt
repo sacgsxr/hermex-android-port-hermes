@@ -649,6 +649,7 @@ fun ChatRoute(
         state.liveToolActivity,
         state.responseCompletionTrigger,
         state.isLoading,
+        state.isStreaming,
         composerHeightPx,
         statusStackHeightPx,
         transcriptScrollCooldownActive,
@@ -662,16 +663,19 @@ fun ChatRoute(
             return@LaunchedEffect
         }
         delay(32)
-        if (!shouldAutoScrollTranscript(
-                followsBottom = followsTranscriptBottom,
-                isScrollInProgress = transcriptListState.isScrollInProgress,
-                isUserScrollCooldownActive = transcriptScrollCooldownActive,
-            )
-        ) {
-            return@LaunchedEffect
-        }
+        val scrollMode = transcriptAutoScrollMode(
+            followsBottom = followsTranscriptBottom,
+            isScrollInProgress = transcriptListState.isScrollInProgress,
+            isUserScrollCooldownActive = transcriptScrollCooldownActive,
+            isStreamingContentUpdate = state.isStreaming,
+        )
         val lastItem = transcriptListState.layoutInfo.totalItemsCount - 1
-        if (lastItem >= 0) transcriptListState.animateScrollToItem(lastItem)
+        if (lastItem < 0) return@LaunchedEffect
+        when (scrollMode) {
+            TranscriptAutoScrollMode.None -> Unit
+            TranscriptAutoScrollMode.KeepBottom -> transcriptListState.scrollToItem(lastItem, Int.MAX_VALUE)
+            TranscriptAutoScrollMode.AnimateToBottom -> transcriptListState.animateScrollToItem(lastItem)
+        }
     }
 
     LaunchedEffect(isTranscriptAtBottom, followsTranscriptBottom, transcriptScrollCooldownActive) {
@@ -1133,6 +1137,21 @@ fun ChatRoute(
                         ),
                     ),
             )
+            state.activeTurnIndicator()?.let { indicator ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(
+                            start = 14.dp,
+                            end = 70.dp,
+                            bottom = composerHeight + 10.dp,
+                        ),
+                    contentAlignment = Alignment.BottomStart,
+                ) {
+                    ActiveTurnStatusPill(indicator)
+                }
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -2081,6 +2100,37 @@ private fun StreamRecoveryStatusPill(label: String) {
             .hermexGlass(shape = CircleShape, castsShadow = false)
             .semantics { contentDescription = label }
             .padding(horizontal = 11.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(13.dp),
+            strokeWidth = 1.7.dp,
+            color = MaterialTheme.colorScheme.secondary,
+            trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
+            strokeCap = StrokeCap.Round,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.secondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ActiveTurnStatusPill(indicator: ActiveTurnIndicator) {
+    val localizedActivity = localizedString(indicator.label)
+    val label = indicator.toolName?.let { "$localizedActivity $it" } ?: localizedActivity
+    Row(
+        modifier = Modifier
+            .hermexGlass(shape = CircleShape, castsShadow = false)
+            .semantics { contentDescription = label }
+            .padding(horizontal = 11.dp, vertical = 7.dp)
+            .testTag("active_turn_indicator"),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

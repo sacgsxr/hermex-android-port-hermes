@@ -1,5 +1,6 @@
 package com.uzairansar.hermex.ui.chat
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -77,6 +78,54 @@ class TranscriptAutoScrollPolicyTest {
             shouldAutoScrollTranscript(
                 followsBottom = true,
                 isScrollInProgress = false,
+            ),
+        )
+    }
+
+    @Test
+    fun streamingGrowthKeepsTheBottomAnchoredWithoutStartingAnAnimation() {
+        assertEquals(
+            TranscriptAutoScrollMode.KeepBottom,
+            transcriptAutoScrollMode(
+                followsBottom = true,
+                isScrollInProgress = false,
+                isUserScrollCooldownActive = false,
+                isStreamingContentUpdate = true,
+            ),
+        )
+    }
+
+    @Test
+    fun completedTranscriptChangesRetainAnimatedNavigation() {
+        assertEquals(
+            TranscriptAutoScrollMode.AnimateToBottom,
+            transcriptAutoScrollMode(
+                followsBottom = true,
+                isScrollInProgress = false,
+                isUserScrollCooldownActive = false,
+                isStreamingContentUpdate = false,
+            ),
+        )
+    }
+
+    @Test
+    fun userScrollAwayBlocksBothStreamingAndAnimatedNavigation() {
+        assertEquals(
+            TranscriptAutoScrollMode.None,
+            transcriptAutoScrollMode(
+                followsBottom = false,
+                isScrollInProgress = false,
+                isUserScrollCooldownActive = false,
+                isStreamingContentUpdate = true,
+            ),
+        )
+        assertEquals(
+            TranscriptAutoScrollMode.None,
+            transcriptAutoScrollMode(
+                followsBottom = true,
+                isScrollInProgress = false,
+                isUserScrollCooldownActive = true,
+                isStreamingContentUpdate = false,
             ),
         )
     }
