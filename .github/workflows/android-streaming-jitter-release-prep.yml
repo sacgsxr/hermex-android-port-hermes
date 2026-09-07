@@ -20,6 +20,7 @@ jobs:
     env:
       EXPECTED_VERSION_CODE: "36"
       EXPECTED_VERSION_NAME: "1.1.3-clay.3"
+      EXPECTED_SIGNING_CERT_SHA256: "3c46c0ed82a8ff7f9ca27f7881fd5c98f77092e2fe4a37c608bc32c57ac4af84"
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -116,41 +117,91 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
+          fail() {
+            echo "::error::$*"
+            exit 1
+          }
+
           apk_path="$GITHUB_WORKSPACE/android/app/build/outputs/apk/release/app-release.apk"
           if [ ! -s "$apk_path" ]; then
-            echo "Signed release APK is missing or empty"
-            exit 1
+            fail "Signed release APK is missing or empty: $apk_path"
           fi
+
+          diagnostic_dir="$GITHUB_WORKSPACE/android-verification-diagnostics"
+          mkdir -p "$diagnostic_dir"
+          echo "APK path: $apk_path"
+          echo "APK size: $(stat --format='%s bytes' "$apk_path")"
 
           build_tools_root="${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools"
           mapfile -t build_tool_dirs < <(find "$build_tools_root" -mindepth 1 -maxdepth 1 -type d -print | sort -V)
           if [ "${#build_tool_dirs[@]}" -eq 0 ]; then
-            echo "No installed Android build-tools found under $build_tools_root"
-            exit 1
+            fail "No installed Android build-tools found under $build_tools_root"
           fi
           build_tools_dir="${build_tool_dirs[${#build_tool_dirs[@]}-1]}"
           aapt2="$build_tools_dir/aapt2"
           apksigner="$build_tools_dir/apksigner"
+          [ -x "$aapt2" ] || fail "aapt2 is unavailable or not executable: $aapt2"
+          [ -x "$apksigner" ] || fail "apksigner is unavailable or not executable: $apksigner"
+          echo "Android build-tools: $build_tools_dir"
 
-          badging="$RUNNER_TEMP/hermex-apk-badging.txt"
-          "$aapt2" dump badging "$apk_path" > "$badging"
-          package_line="$(grep -m1 '^package: ' "$badging")"
-          [[ "$package_line" == *"name='com.uzairansar.hermex'"* ]]
-          [[ "$package_line" == *"versionName='$ANDROID_VERSION_NAME'"* ]]
-          [[ "$package_line" == *"versionCode='$ANDROID_VERSION_CODE'"* ]]
+          badging="$diagnostic_dir/hermex-apk-badging.txt"
+          if ! "$aapt2" dump badging "$apk_path" > "$badging" 2>&1; then
+            printf '%s\n' "--- aapt2 dump badging ---"
+            printf '%s\n' "$(<"$badging")"
+            fail "aapt2 could not read APK package metadata"
+          fi
+          package_line="$(grep -m1 '^package: ' "$badging" || true)"
+          echo "APK package metadata: ${package_line:-<missing package line>}"
+          echo "Expected package metadata: name='com.uzairansar.hermex' versionName='$ANDROID_VERSION_NAME' versionCode='$ANDROID_VERSION_CODE'"
+          [ -n "$package_line" ] || fail "APK metadata does not contain a package line"
+          [[ "$package_line" == *"name='com.uzairansar.hermex'"* ]] || fail "APK package name does not equal com.uzairansar.hermex"
+          [[ "$package_line" == *"versionName='$ANDROID_VERSION_NAME'"* ]] || fail "APK versionName does not equal $ANDROID_VERSION_NAME"
+          [[ "$package_line" == *"versionCode='$ANDROID_VERSION_CODE'"* ]] || fail "APK versionCode does not equal $ANDROID_VERSION_CODE"
 
-          signer_output="$RUNNER_TEMP/hermex-apk-signer.txt"
-          "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output"
-          apk_digest="$(sed -n 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: //p' "$signer_output" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          keystore_digest="$(keytool -exportcert -rfc \
+          signer_output="$diagnostic_dir/hermex-apk-signer.txt"
+          if ! "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output" 2>&1; then
+            printf '%s\n' "--- apksigner verification output ---"
+            printf '%s\n' "$(<"$signer_output")"
+            fail "apksigner rejected the APK"
+          fi
+          printf '%s\n' "--- apksigner verification output (certificate metadata is public) ---"
+          printf '%s\n' "$(<"$signer_output")"
+          apk_digest="$(python3 - "$signer_output" <<'PY'
+          import re
+          import sys
+
+          output = open(sys.argv[1], encoding="utf-8").read()
+          match = re.search(r"^\s*Signer #1 certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$", output, re.MULTILINE)
+          print(re.sub(r"[^0-9a-f]", "", match.group(1).lower()) if match else "")
+          PY
+          )"
+
+          keystore_cert_der="$diagnostic_dir/hermex-keystore-cert.der"
+          if ! keytool -exportcert \
             -keystore "$HERMEX_ANDROID_KEYSTORE_FILE" \
             -storepass:env HERMEX_ANDROID_KEYSTORE_PASSWORD \
-            -alias "$HERMEX_ANDROID_KEY_ALIAS" | \
-            openssl x509 -outform DER | openssl dgst -sha256 -hex | \
-            sed 's/^.*= //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test -n "$apk_digest"
-          test -n "$keystore_digest"
-          test "$apk_digest" = "$keystore_digest"
+            -alias "$HERMEX_ANDROID_KEY_ALIAS" \
+            -file "$keystore_cert_der" > "$diagnostic_dir/hermex-keytool-export.txt" 2>&1; then
+            printf '%s\n' "$(<"$diagnostic_dir/hermex-keytool-export.txt")"
+            fail "Could not export the configured keystore certificate"
+          fi
+          keystore_digest="$(python3 - "$keystore_cert_der" <<'PY'
+          import hashlib
+          import sys
+
+          with open(sys.argv[1], "rb") as certificate:
+              print(hashlib.sha256(certificate.read()).hexdigest())
+          PY
+          )"
+
+          echo "APK signer certificate SHA-256: ${apk_digest:-<missing>}"
+          echo "Configured keystore certificate SHA-256: ${keystore_digest:-<missing>}"
+          echo "Expected Clay certificate SHA-256: $EXPECTED_SIGNING_CERT_SHA256"
+          [ "${#apk_digest}" -eq 64 ] || fail "Could not extract a valid signer certificate SHA-256 from apksigner output"
+          [ "${#keystore_digest}" -eq 64 ] || fail "Could not compute a valid SHA-256 for the exported keystore DER certificate"
+          [ "$keystore_digest" = "$EXPECTED_SIGNING_CERT_SHA256" ] || fail "Configured keystore certificate does not match the expected Clay signing certificate"
+          [ "$apk_digest" = "$keystore_digest" ] || fail "APK signer certificate does not match the configured keystore certificate"
+          [ "$apk_digest" = "$EXPECTED_SIGNING_CERT_SHA256" ] || fail "APK signer certificate does not match the expected Clay signing certificate"
 
           release_dir="$GITHUB_WORKSPACE/android-release"
           mkdir -p "$release_dir"
@@ -183,6 +234,17 @@ jobs:
           name: hermex-android-1.1.3-clay.3-signed
           if-no-files-found: error
           path: android-release
+
+      - name: Upload unverified APK diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: hermex-android-1.1.3-clay.3-UNVERIFIED-diagnostic
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android-verification-diagnostics
 
       - name: Upload verification reports
         if: always()
