@@ -171,7 +171,11 @@ jobs:
           import sys
 
           output = open(sys.argv[1], encoding="utf-8").read()
-          match = re.search(r"^\s*Signer #1 certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$", output, re.MULTILINE)
+          match = re.search(
+              r"^\s*(?:Signer #1|V\d+ Signer): certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$",
+              output,
+              re.MULTILINE,
+          )
           print(re.sub(r"[^0-9a-f]", "", match.group(1).lower()) if match else "")
           PY
           )"
