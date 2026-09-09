@@ -8,10 +8,13 @@ import com.uzairansar.hermex.core.network.SseStreamClient
 import com.uzairansar.hermex.data.db.ServerCacheOwnership
 import com.uzairansar.hermex.data.repository.ChatRepository
 import com.uzairansar.hermex.data.repository.RecordingCacheDao
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -325,7 +328,11 @@ class ChatViewModelPendingNewChatTest {
     }
 
     private fun clearViewModel(viewModel: ChatViewModel) {
+        val scopeJob = viewModel.viewModelScope.coroutineContext[Job]
         androidx.lifecycle.ViewModel::class.java.getDeclaredMethod("clear\$lifecycle_viewmodel").apply { isAccessible = true }.invoke(viewModel)
+        runBlocking {
+            withTimeout(5_000) { scopeJob?.join() }
+        }
     }
 
     private fun closeTestServer(server: MockWebServer) {
