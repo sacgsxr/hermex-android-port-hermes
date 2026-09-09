@@ -3965,6 +3965,7 @@ class ChatViewModel internal constructor(
         hadPersistedConversation: Boolean,
         message: String,
     ) {
+        sendStartInProgress = false
         _state.update { current ->
             val restoredDraft = when {
                 current.draft.isBlank() -> text
