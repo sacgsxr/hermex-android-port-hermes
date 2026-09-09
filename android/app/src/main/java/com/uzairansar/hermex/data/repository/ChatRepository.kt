@@ -313,7 +313,7 @@ class ChatRepository(
             workspace = workspace?.trim()?.takeIf { it.isNotBlank() },
             model = model?.id ?: model?.name,
             modelProvider = model?.provider,
-            profile = profile?.name,
+            profile = profile?.name ?: profile?.displayName,
         ),
     ).session
 

@@ -141,6 +141,7 @@ fun SessionListRoute(
     onOpenChat: (String) -> Unit,
     onOpenVoiceChat: (String) -> Unit,
     onOpenSharedDraft: (String) -> Unit,
+    onOpenPendingChat: (SessionOpenDestination, String?) -> Unit,
     onOpenPanels: () -> Unit,
     onOpenPanel: (String) -> Unit = { onOpenPanels() },
     onOpenKanban: () -> Unit,
@@ -292,7 +293,7 @@ fun SessionListRoute(
         if (!shortcutConsumed && shortcutAction == ShortcutDestination.ShareAction) {
             shortcutConsumed = true
             if (container.sharedDraftStore.hasPendingDraft()) {
-                viewModel.createSession(destination = SessionOpenDestination.SharedDraft)
+                onOpenPendingChat(SessionOpenDestination.SharedDraft, null)
             }
         } else if (!shortcutConsumed && shortcutAction != null && pendingShortcutAction == null) {
             pendingShortcutAction = shortcutAction
@@ -484,7 +485,7 @@ fun SessionListRoute(
 
         if (!searchExpanded) {
             NewChatFloatingButton(
-                onClick = { viewModel.createSession() },
+                onClick = { onOpenPendingChat(SessionOpenDestination.Chat, null) },
                 enabled = !state.isMutating,
                 tintColor = primaryActionTintColor,
                 compact = usesCompactFloatingAction,
@@ -515,9 +516,9 @@ fun SessionListRoute(
                         pendingShortcutAction = null
                         shortcutConsumed = true
                         when {
-                            isVoice -> viewModel.createSession(destination = SessionOpenDestination.VoiceChat)
-                            isProfile -> viewModel.createSession(profile = shortcutProfile)
-                            else -> viewModel.createSession()
+                            isVoice -> onOpenPendingChat(SessionOpenDestination.VoiceChat, null)
+                            isProfile -> onOpenPendingChat(SessionOpenDestination.Chat, shortcutProfile)
+                            else -> onOpenPendingChat(SessionOpenDestination.Chat, null)
                         }
                     },
                 ) { Text(localizedString("Continue")) }

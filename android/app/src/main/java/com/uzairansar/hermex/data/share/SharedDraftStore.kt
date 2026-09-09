@@ -212,6 +212,15 @@ class SharedDraftStore(
         true
     }
 
+    /** Discards only the draft generation owned by the pending composer. */
+    fun discardPendingDraft(expectedCreatedAtEpochMillis: Long): Boolean = synchronized(STORE_LOCK) {
+        val current = loadPendingDraft(removeAfterLoad = false) ?: return@synchronized true
+        if (current.createdAtEpochMillis != expectedCreatedAtEpochMillis) return@synchronized false
+        if (!preferences.edit().remove(KEY).commit()) return@synchronized false
+        deleteSharedAttachmentCaches(current.attachments, cacheDirectory)
+        true
+    }
+
     fun hasPendingDraft(): Boolean = loadPendingDraft(removeAfterLoad = false) != null
 
     companion object {

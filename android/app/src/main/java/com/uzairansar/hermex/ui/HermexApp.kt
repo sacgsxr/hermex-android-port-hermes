@@ -45,6 +45,9 @@ import com.uzairansar.hermex.AppContainer
 import com.uzairansar.hermex.BuildConfig
 import com.uzairansar.hermex.data.repository.AuthState
 import com.uzairansar.hermex.ui.chat.ChatRoute
+import com.uzairansar.hermex.ui.chat.isPendingNewChatId
+import com.uzairansar.hermex.ui.chat.newPendingNewChatSessionId
+import com.uzairansar.hermex.ui.chat.shouldReplacePendingChatRoute
 import com.uzairansar.hermex.ui.git.GitRoute
 import com.uzairansar.hermex.ui.kanban.KanbanLabRoute
 import com.uzairansar.hermex.ui.kanban.KanbanLabFixtureDataSource
@@ -54,6 +57,7 @@ import com.uzairansar.hermex.ui.localization.localizedString
 import com.uzairansar.hermex.ui.onboarding.OnboardingRoute
 import com.uzairansar.hermex.ui.panels.PanelsRoute
 import com.uzairansar.hermex.ui.sessions.SessionListRoute
+import com.uzairansar.hermex.ui.sessions.SessionOpenDestination
 import com.uzairansar.hermex.ui.settings.SettingsRoute
 import com.uzairansar.hermex.ui.theme.HermexTheme
 import com.uzairansar.hermex.ui.theme.LocalHermexHapticsEnabled
@@ -308,6 +312,9 @@ fun HermexApp(
                     var selectedAutoStartsVoice by rememberSaveable(activeServerKey, initiallyOpenSessionId, initiallyAutoStartsVoice) {
                         mutableStateOf(initiallyAutoStartsVoice)
                     }
+                    var selectedPendingProfile by rememberSaveable(activeServerKey, initiallyOpenSessionId) {
+                        mutableStateOf<String?>(null)
+                    }
                     LaunchedEffect(usesRegularWidthLayout, initiallyOpenSessionId) {
                         if (!usesRegularWidthLayout && initiallyOpenSessionId != null) {
                             val suffix = when {
@@ -322,6 +329,13 @@ fun HermexApp(
                         selectedSessionId = sessionId
                         selectedConsumesShare = consumeShare
                         selectedAutoStartsVoice = autoStartVoice
+                        selectedPendingProfile = null
+                    }
+                    val selectPendingChat: (SessionOpenDestination, String?) -> Unit = { destination, profile ->
+                        selectedSessionId = newPendingNewChatSessionId()
+                        selectedConsumesShare = destination == SessionOpenDestination.SharedDraft
+                        selectedAutoStartsVoice = destination == SessionOpenDestination.VoiceChat
+                        selectedPendingProfile = profile
                     }
                     val sessionList: @Composable () -> Unit = {
                         SessionListRoute(
@@ -334,7 +348,7 @@ fun HermexApp(
                             selectedSessionId = selectedSessionId.takeIf { usesRegularWidthLayout },
                             onOpenChat = { sessionId ->
                                 if (usesRegularWidthLayout) selectSession(sessionId, false, false)
-                                else navController.navigateSingleTop("chat/$sessionId")
+                                else navController.navigateSingleTop("chat/${Uri.encode(sessionId)}")
                             },
                             onOpenVoiceChat = { sessionId ->
                                 if (usesRegularWidthLayout) selectSession(sessionId, false, true)
@@ -343,6 +357,18 @@ fun HermexApp(
                             onOpenSharedDraft = { sessionId ->
                                 if (usesRegularWidthLayout) selectSession(sessionId, true, false)
                                 else navController.navigateSingleTop("chat/$sessionId?consumeShare=true")
+                            },
+                            onOpenPendingChat = { destination, profile ->
+                                if (usesRegularWidthLayout) {
+                                    selectPendingChat(destination, profile)
+                                } else {
+                                    val query = listOfNotNull(
+                                        "consumeShare=true".takeIf { destination == SessionOpenDestination.SharedDraft },
+                                        "autoStartVoice=true".takeIf { destination == SessionOpenDestination.VoiceChat },
+                                        profile?.takeIf { it.isNotBlank() }?.let { "pendingProfile=${Uri.encode(it)}" },
+                                    ).joinToString("&").takeIf { it.isNotBlank() }?.let { "?$it" }.orEmpty()
+                                    navController.navigateSingleTop("chat/${Uri.encode(newPendingNewChatSessionId())}$query")
+                                }
                             },
                             onOpenPanels = { navController.navigateSingleTop("panels") },
                             onOpenPanel = { section -> navController.navigateSingleTop("panels?section=$section") },
@@ -383,18 +409,23 @@ fun HermexApp(
                                         sharedDraftStore = container.sharedDraftStore,
                                         consumeSharedDraft = selectedConsumesShare,
                                         autoStartVoice = selectedAutoStartsVoice,
+                                        initialProfileName = selectedPendingProfile,
                                         onOpenChat = { sessionId -> selectSession(sessionId, false, false) },
                                         onBack = { selectedSessionId = null },
-                                        onOpenWorkspace = { navController.navigate("workspace/$detailSessionId") },
-                                        onOpenGit = { navController.navigate("git/$detailSessionId") },
+                                        onOpenWorkspace = {
+                                            if (!isPendingNewChatId(detailSessionId)) {
+                                                navController.navigate("workspace/${Uri.encode(detailSessionId)}")
+                                            }
+                                        },
+                                        onOpenGit = {
+                                            if (!isPendingNewChatId(detailSessionId)) {
+                                                navController.navigate("git/${Uri.encode(detailSessionId)}")
+                                            }
+                                        },
                                     )
                                 } else {
                                     RegularWidthEmptyDetail(
-                                        onNewChat = {
-                                            navController.navigateSingleTop(
-                                                ShortcutDestination.sessionsRoute(ShortcutDestination.NewSessionAction),
-                                            )
-                                        },
+                                        onNewChat = { selectPendingChat(SessionOpenDestination.Chat, null) },
                                     )
                                 }
                             },
@@ -402,7 +433,7 @@ fun HermexApp(
                     }
                 }
                 composable(
-                    route = "chat/{sessionId}?consumeShare={consumeShare}&autoStartVoice={autoStartVoice}",
+                    route = "chat/{sessionId}?consumeShare={consumeShare}&autoStartVoice={autoStartVoice}&pendingProfile={pendingProfile}",
                     arguments = listOf(
                         navArgument("sessionId") { type = NavType.StringType },
                         navArgument("consumeShare") {
@@ -412,6 +443,11 @@ fun HermexApp(
                         navArgument("autoStartVoice") {
                             type = NavType.BoolType
                             defaultValue = false
+                        },
+                        navArgument("pendingProfile") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
                         },
                     ),
                 ) { entry ->
@@ -431,13 +467,27 @@ fun HermexApp(
                             sharedDraftStore = container.sharedDraftStore,
                             consumeSharedDraft = entry.arguments?.getBoolean("consumeShare") == true,
                             autoStartVoice = entry.arguments?.getBoolean("autoStartVoice") == true,
-                            onOpenChat = { sessionId -> navController.navigateSingleTop("chat/$sessionId") },
+                            initialProfileName = entry.arguments?.getString("pendingProfile"),
+                            onOpenChat = { targetSessionId ->
+                                if (shouldReplacePendingChatRoute(entry.arguments?.getString("sessionId"), targetSessionId)) {
+                                    navController.popBackStack()
+                                    navController.navigateSingleTop("chat/${Uri.encode(targetSessionId)}")
+                                } else {
+                                    navController.navigateSingleTop("chat/${Uri.encode(targetSessionId)}")
+                                }
+                            },
                             onBack = { navController.popBackStack() },
                             onOpenWorkspace = {
-                                navController.navigate("workspace/${requireNotNull(entry.arguments?.getString("sessionId"))}")
+                                val currentSessionId = entry.arguments?.getString("sessionId")
+                                if (!isPendingNewChatId(currentSessionId)) {
+                                    navController.navigate("workspace/${Uri.encode(requireNotNull(currentSessionId))}")
+                                }
                             },
                             onOpenGit = {
-                                navController.navigate("git/${requireNotNull(entry.arguments?.getString("sessionId"))}")
+                                val currentSessionId = entry.arguments?.getString("sessionId")
+                                if (!isPendingNewChatId(currentSessionId)) {
+                                    navController.navigate("git/${Uri.encode(requireNotNull(currentSessionId))}")
+                                }
                             },
                         )
                     }

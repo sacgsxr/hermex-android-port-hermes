@@ -246,6 +246,7 @@ fun ChatRoute(
     sharedDraftStore: SharedDraftStore? = null,
     consumeSharedDraft: Boolean = false,
     autoStartVoice: Boolean = false,
+    initialProfileName: String? = null,
     onOpenChat: (String) -> Unit = {},
     onBack: () -> Unit,
     onOpenWorkspace: () -> Unit,
@@ -259,11 +260,13 @@ fun ChatRoute(
                 sessionId,
                 repository,
                 ChatPendingStateStore(context.applicationContext, "$serverId\u0000$sessionId"),
+                initialProfileName = initialProfileName,
+                sharedDraftStore = sharedDraftStore,
             ) as T
         }
     })
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val gitViewModel: ChatGitViewModel? = gitRepository?.let { repo ->
+    val gitViewModel: ChatGitViewModel? = gitRepository?.takeUnless { isPendingNewChatId(sessionId) }?.let { repo ->
         viewModel(
             key = "$viewModelKey:git",
             factory = object : ViewModelProvider.Factory {
@@ -372,6 +375,10 @@ fun ChatRoute(
             dictationController.cancel()
             listenPlaybackController.close()
         }
+    }
+
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.abandonPendingComposer() }
     }
 
     val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -1246,7 +1253,10 @@ fun ChatRoute(
             hasRepository = gitState.hasRepository,
             showsFilesButton = chatDisplaySettings.showsChatFilesButton,
             showsGitControls = chatDisplaySettings.showsChatGitControls,
-            onBack = onBack,
+            onBack = {
+                if (isPendingNewChatId(sessionId)) viewModel.abandonPendingComposer()
+                onBack()
+            },
             onOpenWorkspace = onOpenWorkspace,
             onOpenGit = onOpenGit,
             canClearConversation = state.messages.isNotEmpty() &&
