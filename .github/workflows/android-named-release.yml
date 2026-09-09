@@ -12,9 +12,9 @@ on:
         required: true
         type: string
       prerelease:
-        description: "Publish as a prerelease"
+        description: "Publish as a prerelease (prereleases are excluded from the app updater's /releases/latest channel)"
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -106,16 +106,120 @@ jobs:
 
       - name: Test and build Android artifacts
         working-directory: android
-        run: ./gradlew testDebugUnitTest lintRelease pixel2api35DebugAndroidTest assembleRelease bundleRelease
+        run: ./gradlew testDebugUnitTest lintRelease assembleRelease bundleRelease
+
+      - name: Run API 35 connected-device tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest
+
+      - name: Verify signed Android artifacts
+        working-directory: android
+        run: |
+          set -euo pipefail
+          apk_path="$GITHUB_WORKSPACE/android/app/build/outputs/apk/release/app-release.apk"
+          aab_path="$GITHUB_WORKSPACE/android/app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -s "$apk_path" ]; then
+            echo "Signed release APK is missing or empty"
+            exit 1
+          fi
+          if [ ! -s "$aab_path" ]; then
+            echo "Release AAB is missing or empty"
+            exit 1
+          fi
+
+          build_tools_root="${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools"
+          mapfile -t build_tool_dirs < <(find "$build_tools_root" -mindepth 1 -maxdepth 1 -type d -print | sort -V)
+          if [ "${#build_tool_dirs[@]}" -eq 0 ]; then
+            echo "No installed Android build-tools found under $build_tools_root"
+            exit 1
+          fi
+          build_tools_dir="${build_tool_dirs[${#build_tool_dirs[@]}-1]}"
+          aapt2="$build_tools_dir/aapt2"
+          apksigner="$build_tools_dir/apksigner"
+          for executable in "$aapt2" "$apksigner"; do
+            if [ ! -x "$executable" ]; then
+              echo "Missing executable: $executable"
+              exit 1
+            fi
+          done
+
+          badging="$RUNNER_TEMP/hermex-apk-badging.txt"
+          "$aapt2" dump badging "$apk_path" > "$badging"
+          package_line="$(grep -m1 '^package: ' "$badging")"
+          expected_package="com.uzairansar.hermex"
+          if [[ "$package_line" != *"name='$expected_package'"* ]]; then
+            echo "APK package does not match $expected_package"
+            exit 1
+          fi
+          if [[ "$package_line" != *"versionName='$ANDROID_VERSION_NAME'"* ]]; then
+            echo "APK versionName does not match the extracted release identity"
+            exit 1
+          fi
+          if [[ "$package_line" != *"versionCode='$ANDROID_VERSION_CODE'"* ]]; then
+            echo "APK versionCode does not match the extracted release identity"
+            exit 1
+          fi
+
+          signer_output="$RUNNER_TEMP/hermex-apk-signer.txt"
+          "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output"
+          apk_digest="$(sed -n 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: //p' "$signer_output" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$apk_digest" ]; then
+            echo "Could not read APK signer SHA-256 digest"
+            exit 1
+          fi
+
+          keystore_digest="$(keytool -exportcert -rfc \
+            -keystore "$HERMEX_ANDROID_KEYSTORE_FILE" \
+            -storepass:env HERMEX_ANDROID_KEYSTORE_PASSWORD \
+            -alias "$HERMEX_ANDROID_KEY_ALIAS" | \
+            openssl x509 -outform DER | openssl dgst -sha256 -hex | \
+            sed 's/^.*= //' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$keystore_digest" ]; then
+            echo "Could not read configured keystore certificate SHA-256 digest"
+            exit 1
+          fi
+          if [ "$apk_digest" != "$keystore_digest" ]; then
+            echo "APK signer does not match the configured keystore alias certificate"
+            exit 1
+          fi
+
+          release_dir="$GITHUB_WORKSPACE/android-release"
+          mkdir -p "$release_dir"
+          cp "$apk_path" "$release_dir/app-release.apk"
+          cp "$aab_path" "$release_dir/app-release.aab"
+          apk_sha256="$(sha256sum "$release_dir/app-release.apk" | cut -d ' ' -f1)"
+          export RELEASE_JSON_PATH="$release_dir/release.json"
+          export RELEASE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ inputs.tag_name }}/app-release.apk"
+          export RELEASE_APK_SHA256="$apk_sha256"
+          python3 - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "versionCode": int(os.environ["ANDROID_VERSION_CODE"]),
+              "versionName": os.environ["ANDROID_VERSION_NAME"],
+              "packageName": "com.uzairansar.hermex",
+              "apkUrl": os.environ["RELEASE_APK_URL"],
+              "sha256": os.environ["RELEASE_APK_SHA256"],
+          }
+          with open(os.environ["RELEASE_JSON_PATH"], "w", encoding="utf-8") as output:
+              json.dump(payload, output, indent=2)
+              output.write("\n")
+          PY
+          (cd "$release_dir" && sha256sum app-release.apk app-release.aab release.json > SHA256SUMS.txt)
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v5
         with:
           name: hermex-android-artifacts
           if-no-files-found: error
-          path: |
-            android/app/build/outputs/apk/release/app-release.apk
-            android/app/build/outputs/bundle/release/app-release.aab
+          path: android-release
 
   github-release:
     name: GitHub Release
@@ -137,18 +241,18 @@ jobs:
           cat > release-notes.md <<EOF
           Hermex ${ANDROID_VERSION_NAME} native Android release artifacts (version code ${ANDROID_VERSION_CODE}).
 
-          The APK and AAB are signed with the permanent Hermex release key. Keep using
-          this signing identity for every future update.
+          This is Clay's personal Hermex fork, with persistent 85%-200% pinch zoom.
+          The APK and AAB use Clay's permanent signing identity; keep using this
+          signing identity for every future update.
 
-          Upgrade note: ${ANDROID_VERSION_NAME} installs directly over production-signed 1.0.x builds.
-          GitHub APKs from 0.2.7 and earlier used a debug signature and may still require
-          uninstalling the old app once before installing this release.
+          Upgrade note: uninstall the upstream Hermex app once before installing this
+          fork for the first time. Future fork updates can install over this fork.
 
           This release was gated by:
           - iOS/Android endpoint parity
           - Android localization catalog parity
           - Android unit tests
-          - Android API 35 managed-device tests
+          - Android API 35 connected-device tests
           - Android release lint
           - production-signed release APK and AAB builds
           EOF

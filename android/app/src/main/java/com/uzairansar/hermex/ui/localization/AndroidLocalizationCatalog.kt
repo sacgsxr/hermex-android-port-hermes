@@ -1271,6 +1271,8 @@ internal object AndroidLocalizationCatalog {
         "Deny" to R.string.l10n_53577bb5df0ee9b6,
         "Details" to R.string.l10n_dc3decbb93847518,
         "Discard" to R.string.l10n_36fff63ccbcd7bf9,
+        "Download the APK in your browser, then tap it to install. Hermex never installs updates silently." to R.string.l10n_cb5759610697bd05,
+        "Download update" to R.string.l10n_870d57b0e882a552,
         "File changes" to R.string.l10n_663da9347806aa18,
         "Filters" to R.string.l10n_96e578211aa29531,
         "Hermex could not open its encrypted account data. Resetting removes saved servers, sign-in cookies, and custom headers from this device." to R.string.l10n_1ce5eec83a4626a6,

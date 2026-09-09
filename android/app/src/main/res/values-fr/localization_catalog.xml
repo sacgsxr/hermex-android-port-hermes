@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Refuser"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Détails"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Ignorer"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Téléchargez l’APK dans votre navigateur, puis touchez-le pour l’installer. Hermex n’installe jamais les mises à jour silencieusement."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Télécharger la mise à jour"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"Modifications de fichiers"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filtres"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex n?a pas pu ouvrir les donn?es chiffr?es du compte. La r?initialisation supprimera de cet appareil les serveurs enregistr?s, les cookies de connexion et les en-t?tes personnalis?s."</string>

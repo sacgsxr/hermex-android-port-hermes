@@ -24,6 +24,7 @@ import com.uzairansar.hermex.core.model.PendingClarification
 import com.uzairansar.hermex.core.model.PersonalitySummary
 import com.uzairansar.hermex.core.model.ProfileSummary
 import com.uzairansar.hermex.core.model.ProfilesResponse
+import com.uzairansar.hermex.core.model.ProviderSummary
 import com.uzairansar.hermex.core.model.SessionStatusResponse
 import com.uzairansar.hermex.core.model.SkillSummary
 import com.uzairansar.hermex.core.model.ToolCallGroup
@@ -146,6 +147,8 @@ private object BackgroundTaskRegistry {
     fun save(sessionId: String, values: Map<String, BackgroundTaskState>) {
         if (values.isEmpty()) tasks.remove(sessionId) else tasks[sessionId] = values.toMap()
     }
+
+    fun clear(sessionId: String) { tasks.remove(sessionId) }
 }
 
 @Serializable
@@ -183,11 +186,17 @@ internal data class PendingLocalAttachmentUpload(
     val mimeType: String? = null,
 )
 
+internal fun pendingComposerOwnedFilePaths(
+    localUploads: Iterable<PendingLocalAttachmentUpload>,
+    sharedDraftRemainder: Iterable<SharedAttachment>,
+): Set<String> = (localUploads.map { it.cachedPath } + sharedDraftRemainder.mapNotNull { it.cachedPath })
+    .filter { it.isNotBlank() }
+    .toSet()
+
 internal class ChatPendingStateStore(context: Context, key: String) {
     private val preferences = context.getSharedPreferences("hermex_chat_pending_state", Context.MODE_PRIVATE)
-    private val preferenceKey = MessageDigest.getInstance("SHA-256")
-        .digest(key.toByteArray(Charsets.UTF_8))
-        .joinToString("") { byte -> "%02x".format(byte) }
+    private var logicalKey = key
+    private var preferenceKey = key.digestKey()
 
     @Synchronized
     fun load(): PersistedChatPendingState = preferences.getString(preferenceKey, null)
@@ -212,6 +221,29 @@ internal class ChatPendingStateStore(context: Context, key: String) {
     fun clear() {
         preferences.edit().remove(preferenceKey).apply()
     }
+
+    @Synchronized
+    fun rekey(key: String, durable: Boolean = true) {
+        val nextKey = key.digestKey()
+        if (nextKey == preferenceKey) return
+        val editor = preferences.edit()
+        preferences.getString(preferenceKey, null)?.let { value ->
+            editor.putString(nextKey, value)
+        }
+        editor.remove(preferenceKey)
+        if (durable) check(editor.commit()) { "Could not transfer pending chat state." } else editor.apply()
+        logicalKey = key
+        preferenceKey = nextKey
+    }
+
+    @Synchronized
+    fun rekeySession(sessionId: String) {
+        rekey("${logicalKey.substringBefore('\u0000')}\u0000$sessionId")
+    }
+
+    private fun String.digestKey(): String = MessageDigest.getInstance("SHA-256")
+        .digest(toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(byte) }
 }
 
 internal fun draftAfterConsuming(current: String, consumed: String): String =
@@ -258,6 +290,7 @@ internal fun copyAttachmentWithLimit(
 
 private data class ComposerConfig(
     val models: List<ModelSummary>,
+    val providers: List<ProviderSummary>,
     val profiles: ProfilesResponse,
     val workspaces: WorkspacesResponse,
     val skillSuggestions: List<SlashSkillSuggestion>,
@@ -279,6 +312,7 @@ data class ChatUiState(
     val completedToolCallGroups: List<ToolCallGroup> = emptyList(),
     val draft: String = "",
     val modelOptions: List<ModelSummary> = emptyList(),
+    val providerSummaries: List<ProviderSummary> = emptyList(),
     val agentCommands: List<AgentCommand> = emptyList(),
     val profileOptions: List<ProfileSummary> = emptyList(),
     val reasoningOptions: List<String> = ReasoningEffortOption.optionsForSupportedEfforts(null).map { it.id },
@@ -297,6 +331,7 @@ data class ChatUiState(
     val sessionModel: String? = null,
     val sessionModelProvider: String? = null,
     val pendingExplicitModelPick: Boolean = false,
+    val pendingExplicitProfilePick: Boolean = false,
     val sessionTitle: String? = null,
     val sessionWorkspacePath: String? = null,
     val sessionProfile: String? = null,
@@ -353,11 +388,16 @@ data class ChatUiState(
 }
 
 class ChatViewModel internal constructor(
-    private val sessionId: String,
+    initialSessionId: String,
     private val repository: ChatRepository,
     private val pendingStateStore: ChatPendingStateStore? = null,
+    initialProfileName: String? = null,
+    private val sharedDraftStore: SharedDraftStore? = null,
 ) : ViewModel() {
-    private val registryKey = "${repository.serverUrl}\u0000$sessionId"
+    private var sessionId = initialSessionId
+    private var isPendingNewChat = isPendingNewChatId(initialSessionId)
+    private var registryKey = "${repository.serverUrl}\u0000$sessionId"
+    private var pendingModelSelectionLocked = isPendingNewChat
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
     private var streamJob: Job? = null
@@ -408,7 +448,10 @@ class ChatViewModel internal constructor(
     private var currentBtwTask: BtwTaskState? = null
     private var importedSharedDraftCreatedAtEpochMillis: Long? = null
     private var importedSharedDraftRemainder: List<SharedAttachment> = emptyList()
+    private var ownedSharedDraftGeneration: Long? = null
     private var isDrainingQueuedSlashMessage = false
+    private var sendStartInProgress = false
+    @Volatile private var pendingComposerAbandoned = false
     @Volatile private var isClearing = false
 
     init {
@@ -425,12 +468,48 @@ class ChatViewModel internal constructor(
         currentBtwTask = persisted?.btwTask ?: BtwTaskRegistry.load(registryKey)
         importedSharedDraftCreatedAtEpochMillis = persisted?.importedSharedDraftCreatedAtEpochMillis
         importedSharedDraftRemainder = persisted?.importedSharedDraftRemainder.orEmpty()
+        if (isPendingNewChat && !initialProfileName.isNullOrBlank()) {
+            _state.value = _state.value.copy(
+                sessionProfile = initialProfileName,
+                pendingExplicitProfilePick = true,
+            )
+        }
         currentBtwTask?.let { BtwTaskRegistry.save(registryKey, it) }
-        load()
+        if (!isPendingNewChat) load() else _state.update { it.copy(isLoading = false) }
         loadComposerConfig()
-        refreshApprovalBypassState()
-        resumePendingLocalUploads()
+        if (!isPendingNewChat) {
+            refreshApprovalBypassState()
+            resumePendingLocalUploads()
+        }
     }
+
+    private fun transferPendingStateOwnership(realSessionId: String) {
+        if (!isPendingNewChat || !realSessionId.isNotBlank()) return
+        val oldRegistryKey = registryKey
+        sessionId = realSessionId
+        isPendingNewChat = false
+        registryKey = "${repository.serverUrl}\u0000$realSessionId"
+        pendingStateStore?.rekeySession(realSessionId)
+        if (oldRegistryKey != registryKey) {
+            val queued = QueuedDraftRegistry.load(oldRegistryKey)
+            if (queued.isNotEmpty()) QueuedDraftRegistry.save(registryKey, queued)
+            QueuedDraftRegistry.clear(oldRegistryKey)
+            val background = BackgroundTaskRegistry.load(oldRegistryKey)
+            if (background.isNotEmpty()) BackgroundTaskRegistry.save(registryKey, background)
+            BackgroundTaskRegistry.clear(oldRegistryKey)
+            BtwTaskRegistry.load(oldRegistryKey)?.let { BtwTaskRegistry.save(registryKey, it) }
+            BtwTaskRegistry.clear(oldRegistryKey)
+        }
+        _state.update {
+            it.copy(
+                sessionModel = it.selectedModel?.id ?: it.selectedModel?.name ?: it.sessionModel,
+                sessionModelProvider = it.selectedModel?.provider ?: it.sessionModelProvider,
+                sessionWorkspacePath = it.selectedWorkspacePath ?: it.sessionWorkspacePath,
+                sessionProfile = it.selectedProfile?.name ?: it.selectedProfile?.displayName ?: it.sessionProfile,
+            )
+        }
+    }
+
 
     fun updateDraft(value: String) {
         _state.update { it.copy(draft = value, error = null, notice = null) }
@@ -444,9 +523,74 @@ class ChatViewModel internal constructor(
     fun updateClarificationDraft(value: String) = _state.update { it.copy(clarificationDraft = value, error = null) }
     fun consumeOpenSession() = _state.update { it.copy(openSessionId = null) }
 
+    /** Releases state owned by a pending composer without touching transferred session state. */
+    fun abandonPendingComposer() {
+        if (!isPendingNewChat || pendingComposerAbandoned) return
+        pendingComposerAbandoned = true
+        isClearing = true
+        sendStartGeneration += 1
+        composerConfigGeneration += 1
+        loadGeneration += 1
+        modelSwitchGeneration += 1
+        profileSwitchGeneration += 1
+        reasoningSwitchGeneration += 1
+        workspaceSwitchGeneration += 1
+        draftPersistenceJob?.cancel()
+        streamJob?.cancel()
+        streamPacingJob?.cancel()
+        streamRecoveryJob?.cancel()
+        streamLivenessJob?.cancel()
+        completedTranscriptRefreshJob?.cancel()
+        composerConfigJob?.cancel()
+        modelSwitchJob?.cancel()
+        profileSwitchJob?.cancel()
+        reasoningSwitchJob?.cancel()
+        workspaceSwitchJob?.cancel()
+        loadJob?.cancel()
+        olderMessagesJob?.cancel()
+        sendStartJob?.cancel()
+        btwJob?.cancel()
+        backgroundPollJob?.cancel()
+        pendingPromptJob?.cancel()
+        workspaceSuggestionsJob?.cancel()
+        val ownedPaths = pendingComposerOwnedFilePaths(pendingLocalUploads.values, importedSharedDraftRemainder)
+        pendingLocalUploads.clear()
+        queuedSlashMessages.clear()
+        backgroundPromptsByTaskId.clear()
+        currentBtwTask = null
+        importedSharedDraftCreatedAtEpochMillis = null
+        importedSharedDraftRemainder = emptyList()
+        ownedSharedDraftGeneration?.let { generation -> sharedDraftStore?.discardPendingDraft(generation) }
+        ownedSharedDraftGeneration = null
+        ownedPaths.forEach { path -> runCatching { File(path).delete() } }
+        QueuedDraftRegistry.clear(registryKey)
+        BackgroundTaskRegistry.clear(registryKey)
+        BtwTaskRegistry.clear(registryKey)
+        pendingStateStore?.clear()
+        _state.update {
+            it.copy(
+                draft = "",
+                pendingAttachments = emptyList(),
+                pendingLocalUploadCount = 0,
+                attachmentUploadsInFlight = 0,
+                isRecordingVoiceNote = false,
+                isTranscribingVoiceNote = false,
+                isStreaming = false,
+                activeStreamId = null,
+            )
+        }
+    }
+
     override fun onCleared() {
         isClearing = true
+        if (pendingComposerAbandoned) {
+            super.onCleared()
+            return
+        }
         draftPersistenceJob?.cancel()
+        sendStartGeneration += 1
+        sendStartJob?.cancel()
+        sendStartJob = null
         runCatching { persistPendingState(durable = true) }
         streamJob?.cancel()
         streamPacingJob?.cancel()
@@ -460,7 +604,6 @@ class ChatViewModel internal constructor(
         workspaceSwitchJob?.cancel()
         loadJob?.cancel()
         olderMessagesJob?.cancel()
-        sendStartGeneration += 1
         btwJob?.cancel()
         btwStreamOwnerId = null
         backgroundPollJob?.cancel()
@@ -648,6 +791,15 @@ class ChatViewModel internal constructor(
             runSuspendCatching {
                 coroutineScope {
                     val models = async { repository.models() }
+                    val providers = async {
+                        try {
+                            repository.providers()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                    }
                     val profiles = async { repository.profilesResponse() }
                     val workspaces = async { repository.workspaces() }
                     val skills = async {
@@ -673,6 +825,7 @@ class ChatViewModel internal constructor(
                     )
                     ComposerConfig(
                         models = models.await(),
+                        providers = providers.await(),
                         profiles = profiles.await(),
                         workspaces = workspaces.await(),
                         skillSuggestions = skillSuggestions,
@@ -692,6 +845,7 @@ class ChatViewModel internal constructor(
                     )
                     it.copy(
                         modelOptions = config.models,
+                        providerSummaries = config.providers,
                         agentCommands = config.agentCommands,
                         profileOptions = profileOptions,
                         activeProfileName = activeProfileName,
@@ -700,7 +854,9 @@ class ChatViewModel internal constructor(
                         workspaceSuggestions = workspaceRoots.mapNotNull { root -> root.path },
                         skillSuggestions = config.skillSuggestions,
                         selectedModel = when {
-                            it.pendingExplicitModelPick -> selectedCatalogModel ?: it.selectedModel ?: sessionModelSelection ?: config.models.firstOrNull()
+                            it.pendingExplicitModelPick -> selectedCatalogModel ?: it.selectedModel ?: sessionModelSelection
+                            pendingModelSelectionLocked && it.selectedModel == null -> null
+                            isPendingNewChat -> null
                             sessionModelSelection != null -> sessionModelSelection
                             selectedCatalogModel != null -> selectedCatalogModel
                             it.sessionModel != null -> ModelSummary(
@@ -711,10 +867,14 @@ class ChatViewModel internal constructor(
                             )
                             else -> config.models.firstOrNull()
                         },
-                        selectedProfile = it.selectedProfile
-                            ?: profileOptions.firstMatchingProfile(it.sessionProfile)
-                            ?: profileOptions.firstMatchingProfile(activeProfileName)
-                            ?: profileOptions.firstOrNull(),
+                        selectedProfile = if (it.pendingExplicitProfilePick) {
+                            profileOptions.firstMatchingProfile(it.selectedProfile?.name ?: it.sessionProfile) ?: it.selectedProfile
+                        } else {
+                            it.selectedProfile
+                                ?: profileOptions.firstMatchingProfile(it.sessionProfile)
+                                ?: profileOptions.firstMatchingProfile(activeProfileName)
+                                ?: profileOptions.firstOrNull()
+                        },
                         sessionProfile = it.sessionProfile ?: activeProfileName,
                         selectedWorkspacePath = it.selectedWorkspacePath
                             ?: config.workspaces.last.nonBlank()
@@ -774,6 +934,12 @@ class ChatViewModel internal constructor(
                 error = null,
                 notice = null,
             )
+        }
+        if (isPendingNewChat) {
+            modelSwitchJob?.cancel()
+            _state.update { it.copy(isRunningSessionAction = false) }
+            viewModelScope.launch { refreshReasoningForModel(model) }
+            return
         }
         val generation = ++modelSwitchGeneration
         modelSwitchJob?.cancel()
@@ -852,6 +1018,22 @@ class ChatViewModel internal constructor(
             return
         }
         val profileName = profile.name ?: profile.displayName ?: return
+        if (isPendingNewChat) {
+            _state.update {
+                it.copy(
+                    draft = consumedDraft?.let { consumed -> draftAfterConsuming(it.draft, consumed) } ?: it.draft,
+                    selectedProfile = profile,
+                    activeProfileName = profileName,
+                    sessionProfile = profileName,
+                    pendingExplicitProfilePick = true,
+                    pendingProfileSwitch = null,
+                    isRunningSessionAction = false,
+                    error = null,
+                    notice = null,
+                )
+            }
+            return
+        }
         val currentProfileName = snapshot.selectedProfile?.name ?: snapshot.selectedProfile?.displayName
         if (profileName.equals(currentProfileName, ignoreCase = true)) {
             if (consumedDraft != null) {
@@ -1063,10 +1245,14 @@ class ChatViewModel internal constructor(
             it.copy(
                 selectedWorkspacePath = workspace,
                 sessionWorkspacePath = workspace,
-                isRunningSessionAction = true,
+                isRunningSessionAction = !isPendingNewChat,
                 notice = null,
                 error = null,
             )
+        }
+        if (isPendingNewChat) {
+            persistPendingState(durable = true)
+            return
         }
         val generation = ++workspaceSwitchGeneration
         workspaceSwitchJob?.cancel()
@@ -1194,9 +1380,18 @@ class ChatViewModel internal constructor(
             mimeType = mimeType,
         )
         pendingLocalUploads[pending.id] = pending
-        _state.update { it.copy(pendingLocalUploadCount = pendingLocalUploads.size) }
+        _state.update {
+            it.copy(
+                attachmentUploadsInFlight = if (isPendingNewChat) {
+                    (it.attachmentUploadsInFlight - 1).coerceAtLeast(0)
+                } else {
+                    it.attachmentUploadsInFlight
+                },
+                pendingLocalUploadCount = pendingLocalUploads.size,
+            )
+        }
         persistPendingState(durable = true)
-        uploadPendingLocalAttachment(pending)
+        if (!isPendingNewChat) uploadPendingLocalAttachment(pending)
     }
 
     private fun resumePendingLocalUploads() {
@@ -1244,6 +1439,27 @@ class ChatViewModel internal constructor(
             }
             persistPendingState(durable = true)
         }
+    }
+
+    private suspend fun uploadPendingLocalAttachmentsForSession(targetSessionId: String): List<UploadResponse> {
+        val uploads = mutableListOf<UploadResponse>()
+        pendingLocalUploads.values.toList().forEach { pending ->
+            val file = File(pending.cachedPath)
+            require(file.isFile) { "An attachment could not be restored before sending." }
+            val upload = repository.upload(targetSessionId, file, pending.mimeType)
+            require(upload.error.isNullOrBlank()) { upload.error ?: "Upload failed." }
+            uploads += upload
+            pendingLocalUploads.remove(pending.id)
+            _state.update {
+                it.copy(
+                    pendingAttachments = it.pendingAttachments + upload,
+                    pendingLocalUploadCount = pendingLocalUploads.size,
+                )
+            }
+            file.delete()
+        }
+        persistPendingState(durable = true)
+        return uploads
     }
 
     fun retryPendingLocalUploads() {
@@ -1295,14 +1511,20 @@ class ChatViewModel internal constructor(
 
             val previousState = _state.value
             val previousImportedId = importedSharedDraftCreatedAtEpochMillis
+            val previousOwnedGeneration = ownedSharedDraftGeneration
             val previousRemainder = importedSharedDraftRemainder
             val separator = if (previousState.draft.isBlank() || previousState.draft.endsWith("\n")) "" else "\n\n"
             preparedUploads.forEach { pendingLocalUploads[it.id] = it }
             importedSharedDraftCreatedAtEpochMillis = draft.createdAtEpochMillis
+            ownedSharedDraftGeneration = draft.createdAtEpochMillis
             importedSharedDraftRemainder = deferredAttachments
             _state.value = previousState.copy(
                 draft = if (sharedText.isBlank()) previousState.draft else "${previousState.draft}$separator$sharedText",
-                attachmentUploadsInFlight = previousState.attachmentUploadsInFlight + preparedUploads.size,
+                attachmentUploadsInFlight = if (isPendingNewChat) {
+                    previousState.attachmentUploadsInFlight
+                } else {
+                    previousState.attachmentUploadsInFlight + preparedUploads.size
+                },
                 pendingLocalUploadCount = pendingLocalUploads.size,
                 notice = when {
                     sharedText.isNotBlank() && preparedUploads.isNotEmpty() -> "Shared text and ${preparedUploads.size} attachment(s) added."
@@ -1321,6 +1543,7 @@ class ChatViewModel internal constructor(
             } catch (error: Throwable) {
                 preparedUploads.forEach { pendingLocalUploads.remove(it.id) }
                 importedSharedDraftCreatedAtEpochMillis = previousImportedId
+                ownedSharedDraftGeneration = previousOwnedGeneration
                 importedSharedDraftRemainder = previousRemainder
                 _state.value = previousState.copy(
                     pendingLocalUploadCount = pendingLocalUploads.size,
@@ -1333,14 +1556,19 @@ class ChatViewModel internal constructor(
             if (onDurablyImported(deferredAttachments)) {
                 importedSharedDraftCreatedAtEpochMillis = null
                 importedSharedDraftRemainder = emptyList()
+                ownedSharedDraftGeneration = sharedDraftStore
+                    ?.loadPendingDraft(removeAfterLoad = false)
+                    ?.createdAtEpochMillis
                 persistPendingState(durable = true)
             } else {
                 _state.update {
                     it.copy(error = "Shared content is saved in this chat, but Share cleanup failed. Reopen this chat to retry cleanup.")
                 }
             }
-            preparedUploads.forEach { pending ->
-                viewModelScope.launch { uploadPendingLocalAttachment(pending) }
+            if (!isPendingNewChat) {
+                preparedUploads.forEach { pending ->
+                    viewModelScope.launch { uploadPendingLocalAttachment(pending) }
+                }
             }
         }
     }
@@ -1395,6 +1623,7 @@ class ChatViewModel internal constructor(
         }
         _state.update { it.copy(isTranscribingVoiceNote = true, error = null) }
         viewModelScope.launch {
+            var retainedForPending = false
             runSuspendCatching {
                 try {
                     val response = repository.transcribe(file)
@@ -1402,16 +1631,33 @@ class ChatViewModel internal constructor(
                     require(response.error.isNullOrBlank() && transcript.isNotEmpty()) {
                         response.error ?: "The server did not return a transcript."
                     }
-                    val upload = repository.upload(sessionId, file, "audio/mp4")
-                    require(upload.error.isNullOrBlank() && !upload.path.isNullOrBlank()) {
-                        upload.error ?: "The server did not return the uploaded voice note path."
+                    if (isPendingNewChat) {
+                        enqueuePendingLocalAttachment(file, "audio/mp4")
+                        retainedForPending = true
+                        transcript to null
+                    } else {
+                        val upload = repository.upload(sessionId, file, "audio/mp4")
+                        require(upload.error.isNullOrBlank() && !upload.path.isNullOrBlank()) {
+                            upload.error ?: "The server did not return the uploaded voice note path."
+                        }
+                        transcript to upload
                     }
-                    transcript to upload
                 } finally {
-                    runCatching { file.delete() }
+                    if (!retainedForPending) runCatching { file.delete() }
                 }
             }
                 .onSuccess { (transcript, upload) ->
+                    if (upload == null) {
+                        _state.update { it.copy(isTranscribingVoiceNote = false, error = null) }
+                        submitMessage(
+                            transcript,
+                            _state.value.copy(
+                                draft = transcript,
+                                isTranscribingVoiceNote = false,
+                            ),
+                        )
+                        return@onSuccess
+                    }
                     if (_state.value.isStreaming) {
                         _state.update {
                             it.copy(
@@ -1470,9 +1716,14 @@ class ChatViewModel internal constructor(
         if (text.isEmpty()) return
         val snapshot = _state.value
         if (handleSlashCommand(text, snapshot)) return
-        if (_state.value.isStreaming) return
+        if (_state.value.isStreaming || sendStartInProgress || _state.value.isRunningSessionAction) return
+        sendStartInProgress = true
         viewModelScope.launch {
-            submitMessage(text, snapshot)
+            try {
+                submitMessage(text, snapshot)
+            } finally {
+                sendStartInProgress = false
+            }
         }
     }
 
@@ -1835,9 +2086,34 @@ class ChatViewModel internal constructor(
         }
         persistPendingState()
         var acceptedStreamId: String? = null
+        var createdSessionId: String? = null
+        var sentAttachments: List<UploadResponse> = emptyList()
         return try {
             val explicitModelPick = snapshot.pendingExplicitModelPick && snapshot.selectedModel?.modelIdentity != null
             val streamId = withContext(NonCancellable + Dispatchers.IO) {
+                check(!pendingComposerAbandoned) { "Pending composer was abandoned." }
+                val attachments = if (isPendingNewChat) {
+                    val createdSession = repository.createSession(
+                        workspace = snapshot.selectedWorkspacePath,
+                        model = snapshot.selectedModel,
+                        profile = snapshot.selectedProfile,
+                    )
+                    val newSessionId = createdSession?.sessionId?.takeIf { it.isNotBlank() }
+                        ?: error("The server did not return the new session ID.")
+                    check(!pendingComposerAbandoned) { "Pending composer was abandoned." }
+                    transferPendingStateOwnership(newSessionId)
+                    createdSessionId = newSessionId
+                    snapshot.pendingAttachments
+                } else {
+                    snapshot.pendingAttachments
+                }
+                val locallyUploadedAttachments = if (pendingLocalUploads.isNotEmpty()) {
+                    uploadPendingLocalAttachmentsForSession(sessionId)
+                } else {
+                    emptyList()
+                }
+                check(!pendingComposerAbandoned) { "Pending composer was abandoned." }
+                sentAttachments = (attachments + locallyUploadedAttachments).distinctBy { it.path ?: it.filename }
                 repository.send(
                     sessionId,
                     text,
@@ -1848,9 +2124,16 @@ class ChatViewModel internal constructor(
                         ?: snapshot.sessionProfile
                         ?: snapshot.activeProfileName,
                     explicitModelPick = explicitModelPick,
-                    attachments = snapshot.pendingAttachments,
+                    attachments = sentAttachments,
                     workspace = snapshot.selectedWorkspacePath,
-                ).also { acceptedStreamId = it }
+                )
+            }
+            acceptedStreamId = streamId
+            if (!streamId.isNullOrBlank() && sentAttachments.isNotEmpty()) {
+                _state.update { current ->
+                    current.copy(pendingAttachments = current.pendingAttachments - sentAttachments.toSet())
+                }
+                persistPendingState(durable = true)
             }
             if (generation != sendStartGeneration || cancelledSendStartGeneration == generation || !currentCoroutineContext()[Job]!!.isActive) {
                 val completedBeforeCancellation = !streamId.isNullOrBlank() && cancelAcceptedStream(streamId)
@@ -1886,6 +2169,7 @@ class ChatViewModel internal constructor(
                     it.copy(
                         isStreaming = true,
                         activeStreamId = streamId,
+                        openSessionId = createdSessionId,
                         pendingExplicitModelPick = if (snapshot.pendingExplicitModelPick) false else it.pendingExplicitModelPick,
                     )
                 }
@@ -1898,7 +2182,7 @@ class ChatViewModel internal constructor(
                 ?.takeIf { it.isNotBlank() }
                 ?.let { cancelAcceptedStream(it) }
                 ?: false
-            if (generation == sendStartGeneration || isClearing) {
+            if (!pendingComposerAbandoned && (generation == sendStartGeneration || isClearing)) {
                 if (completedBeforeCancellation) {
                     if (!isClearing) withContext(NonCancellable) { refreshAfterInactiveStream() }
                 } else {
@@ -1913,7 +2197,7 @@ class ChatViewModel internal constructor(
             }
             throw error
         } catch (error: Throwable) {
-            if (generation == sendStartGeneration) {
+            if (generation == sendStartGeneration && !pendingComposerAbandoned) {
                 restoreFailedSend(
                     optimisticMessageId,
                     text,
@@ -3681,6 +3965,7 @@ class ChatViewModel internal constructor(
         hadPersistedConversation: Boolean,
         message: String,
     ) {
+        sendStartInProgress = false
         _state.update { current ->
             val restoredDraft = when {
                 current.draft.isBlank() -> text

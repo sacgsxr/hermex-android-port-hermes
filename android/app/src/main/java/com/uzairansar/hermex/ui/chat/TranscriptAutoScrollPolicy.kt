@@ -29,6 +29,27 @@ internal fun shouldAutoScrollTranscript(
     isUserScrollCooldownActive: Boolean = false,
 ): Boolean = followsBottom && !isScrollInProgress && !isUserScrollCooldownActive
 
+internal enum class TranscriptAutoScrollMode {
+    None,
+    KeepBottom,
+    AnimateToBottom,
+}
+
+internal fun transcriptAutoScrollMode(
+    followsBottom: Boolean,
+    isScrollInProgress: Boolean,
+    isUserScrollCooldownActive: Boolean,
+    isStreamingContentUpdate: Boolean,
+): TranscriptAutoScrollMode = when {
+    !shouldAutoScrollTranscript(
+        followsBottom = followsBottom,
+        isScrollInProgress = isScrollInProgress,
+        isUserScrollCooldownActive = isUserScrollCooldownActive,
+    ) -> TranscriptAutoScrollMode.None
+    isStreamingContentUpdate -> TranscriptAutoScrollMode.KeepBottom
+    else -> TranscriptAutoScrollMode.AnimateToBottom
+}
+
 internal fun isTranscriptNearBottom(
     totalItemsCount: Int,
     lastVisibleIndex: Int,

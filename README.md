@@ -49,6 +49,7 @@ The matching AAB and version-specific notes are available on the [latest release
 - Stop, steer, interrupt, retry, undo, compress context, and use supported slash commands during a run.
 - Browse, search, pin, archive, restore, rename, delete, move, and branch server sessions.
 - Organize sessions with projects and keep recent transcripts readable offline.
+- Pinch with two fingers to resize conversation text from 85% to 200%; the selected scale persists across launches.
 
 ### Agent controls
 

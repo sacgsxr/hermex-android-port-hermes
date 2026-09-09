@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Deny"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Details"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Discard"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Download the APK in your browser, then tap it to install. Hermex never installs updates silently."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Download update"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"File changes"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filters"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex could not open its encrypted account data. Resetting removes saved servers, sign-in cookies, and custom headers from this device."</string>

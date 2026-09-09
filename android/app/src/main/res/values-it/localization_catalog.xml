@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Nega"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Dettagli"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Scarta"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Scarica l’APK nel browser, quindi toccalo per installarlo. Hermex non installa mai aggiornamenti automaticamente."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Scarica aggiornamento"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"Modifiche ai file"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filtri"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex non ha potuto aprire i dati crittografati dell?account. Il ripristino rimuover? da questo dispositivo i server salvati, i cookie di accesso e le intestazioni personalizzate."</string>

@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"거부"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"세부 정보"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"버리기"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"브라우저에서 APK를 다운로드한 다음 탭하여 설치하세요. Hermex는 업데이트를 자동으로 설치하지 않습니다."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"업데이트 다운로드"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"파일 변경 사항"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"필터"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex? ???? ?? ???? ? ? ????. ????? ? ??? ??? ??, ??? ?? ? ??? ?? ??? ?????."</string>

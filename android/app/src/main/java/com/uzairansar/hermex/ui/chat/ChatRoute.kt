@@ -31,7 +31,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -49,7 +48,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -88,6 +86,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -111,7 +110,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.pointerInput
+
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -151,6 +152,7 @@ import com.uzairansar.hermex.core.model.ModelSummary
 import com.uzairansar.hermex.core.model.PendingApproval
 import com.uzairansar.hermex.core.model.PendingClarification
 import com.uzairansar.hermex.core.model.ProfileSummary
+import com.uzairansar.hermex.core.model.ProviderSummary
 import com.uzairansar.hermex.core.model.ToolCall
 import com.uzairansar.hermex.core.model.ToolCallGroup
 import com.uzairansar.hermex.core.model.TranscriptMediaParser
@@ -168,6 +170,7 @@ import com.uzairansar.hermex.core.model.shouldRenderTranscriptItem
 import com.uzairansar.hermex.data.preferences.ChatDisplaySettings
 import com.uzairansar.hermex.data.preferences.DictationProviderPreference
 import com.uzairansar.hermex.data.preferences.LocalSettingsRepository
+import com.uzairansar.hermex.data.preferences.normalizeTranscriptTextScale
 import com.uzairansar.hermex.data.preferences.ModelFavoriteKey
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
 import com.uzairansar.hermex.data.repository.WorkspaceRepository
@@ -186,6 +189,7 @@ import com.uzairansar.hermex.ui.theme.HermexCardShape
 import com.uzairansar.hermex.ui.theme.HermexGlassShape
 import com.uzairansar.hermex.ui.theme.HermexIconButton
 import com.uzairansar.hermex.ui.theme.HermexPillButton
+import com.uzairansar.hermex.ui.theme.HermexPillShape
 import com.uzairansar.hermex.ui.theme.HermexSelectorPill
 import com.uzairansar.hermex.ui.theme.HermexSurfaceLevel
 import com.uzairansar.hermex.ui.theme.LocalHermexHapticsEnabled
@@ -205,6 +209,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import java.io.File
@@ -241,6 +246,7 @@ fun ChatRoute(
     sharedDraftStore: SharedDraftStore? = null,
     consumeSharedDraft: Boolean = false,
     autoStartVoice: Boolean = false,
+    initialProfileName: String? = null,
     onOpenChat: (String) -> Unit = {},
     onBack: () -> Unit,
     onOpenWorkspace: () -> Unit,
@@ -254,11 +260,13 @@ fun ChatRoute(
                 sessionId,
                 repository,
                 ChatPendingStateStore(context.applicationContext, "$serverId\u0000$sessionId"),
+                initialProfileName = initialProfileName,
+                sharedDraftStore = sharedDraftStore,
             ) as T
         }
     })
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val gitViewModel: ChatGitViewModel? = gitRepository?.let { repo ->
+    val gitViewModel: ChatGitViewModel? = gitRepository?.takeUnless { isPendingNewChatId(sessionId) }?.let { repo ->
         viewModel(
             key = "$viewModelKey:git",
             factory = object : ViewModelProvider.Factory {
@@ -298,6 +306,11 @@ fun ChatRoute(
     val chatDisplaySettings by remember(localSettingsRepository) {
         localSettingsRepository?.chatDisplaySettings ?: flowOf(ChatDisplaySettings())
     }.collectAsStateWithLifecycle(initialValue = ChatDisplaySettings())
+    val effectiveTranscriptTextScale = remember { mutableFloatStateOf(chatDisplaySettings.transcriptTextScale) }
+    LaunchedEffect(chatDisplaySettings.transcriptTextScale) {
+        effectiveTranscriptTextScale.floatValue = normalizeTranscriptTextScale(chatDisplaySettings.transcriptTextScale)
+    }
+    val currentLocalSettingsRepository by rememberUpdatedState(localSettingsRepository)
     val streamingSendBehavior by remember(localSettingsRepository) {
         localSettingsRepository?.streamingSendBehavior ?: flowOf(StreamingSendBehavior.Steer)
     }.collectAsStateWithLifecycle(initialValue = StreamingSendBehavior.Steer)
@@ -362,6 +375,10 @@ fun ChatRoute(
             dictationController.cancel()
             listenPlaybackController.close()
         }
+    }
+
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.abandonPendingComposer() }
     }
 
     val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -525,7 +542,6 @@ fun ChatRoute(
     }
     var showsModelPicker by rememberSaveable { mutableStateOf(false) }
     var showsProfilePicker by rememberSaveable { mutableStateOf(false) }
-    var showsReasoningPicker by rememberSaveable { mutableStateOf(false) }
     var showsWorkspacePicker by rememberSaveable { mutableStateOf(false) }
     var showsWorkspaceManager by rememberSaveable { mutableStateOf(false) }
     var showsAttachmentOptions by rememberSaveable { mutableStateOf(false) }
@@ -640,6 +656,7 @@ fun ChatRoute(
         state.liveToolActivity,
         state.responseCompletionTrigger,
         state.isLoading,
+        state.isStreaming,
         composerHeightPx,
         statusStackHeightPx,
         transcriptScrollCooldownActive,
@@ -653,16 +670,19 @@ fun ChatRoute(
             return@LaunchedEffect
         }
         delay(32)
-        if (!shouldAutoScrollTranscript(
-                followsBottom = followsTranscriptBottom,
-                isScrollInProgress = transcriptListState.isScrollInProgress,
-                isUserScrollCooldownActive = transcriptScrollCooldownActive,
-            )
-        ) {
-            return@LaunchedEffect
-        }
+        val scrollMode = transcriptAutoScrollMode(
+            followsBottom = followsTranscriptBottom,
+            isScrollInProgress = transcriptListState.isScrollInProgress,
+            isUserScrollCooldownActive = transcriptScrollCooldownActive,
+            isStreamingContentUpdate = state.isStreaming,
+        )
         val lastItem = transcriptListState.layoutInfo.totalItemsCount - 1
-        if (lastItem >= 0) transcriptListState.animateScrollToItem(lastItem)
+        if (lastItem < 0) return@LaunchedEffect
+        when (scrollMode) {
+            TranscriptAutoScrollMode.None -> Unit
+            TranscriptAutoScrollMode.KeepBottom -> transcriptListState.scrollToItem(lastItem, Int.MAX_VALUE)
+            TranscriptAutoScrollMode.AnimateToBottom -> transcriptListState.animateScrollToItem(lastItem)
+        }
     }
 
     LaunchedEffect(isTranscriptAtBottom, followsTranscriptBottom, transcriptScrollCooldownActive) {
@@ -711,11 +731,6 @@ fun ChatRoute(
         }
     }
 
-    LaunchedEffect(state.showsReasoningControl) {
-        if (!state.showsReasoningControl) {
-            showsReasoningPicker = false
-        }
-    }
     LaunchedEffect(state.showsProfileControl) {
         if (!state.showsProfileControl) {
             showsProfilePicker = false
@@ -893,6 +908,57 @@ fun ChatRoute(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = statusBarHeight)
+                        .pointerInput(Unit) {
+                            while (true) {
+                                var finalScale: Float? = null
+                                try {
+                                    awaitPointerEventScope {
+                                        var pinchPointerIds: List<androidx.compose.ui.input.pointer.PointerId>? = null
+                                        var initialDistance = 0f
+                                        var initialScale = 1f
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val pressedChanges = event.changes.filter { it.pressed }
+                                            if (pinchPointerIds == null) {
+                                                if (pressedChanges.size < 2) continue
+                                                pinchPointerIds = pressedChanges.take(2).map { it.id }
+                                                initialDistance = pinchPointerIds.let { ids ->
+                                                    val first = event.changes.first { it.id == ids[0] }.position
+                                                    val second = event.changes.first { it.id == ids[1] }.position
+                                                    (first - second).getDistance()
+                                                }
+                                                initialScale = effectiveTranscriptTextScale.floatValue
+                                                event.changes.forEach { change ->
+                                                    if (change.positionChanged()) change.consume()
+                                                }
+                                                continue
+                                            }
+
+                                            val ids = pinchPointerIds
+                                            val activeChanges = event.changes.filter { it.id in ids && it.pressed }
+                                            if (activeChanges.size < 2) break
+                                            val distance = (activeChanges[0].position - activeChanges[1].position).getDistance()
+                                            if (initialDistance > 0f && distance > 0f) {
+                                                val normalizedScale = normalizeTranscriptTextScale(
+                                                    initialScale * distance / initialDistance,
+                                                )
+                                                finalScale = normalizedScale
+                                                effectiveTranscriptTextScale.floatValue = normalizedScale
+                                            }
+                                            event.changes.forEach { change ->
+                                                if (change.positionChanged()) change.consume()
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    finalScale?.let { scale ->
+                                        withContext(NonCancellable) {
+                                            currentLocalSettingsRepository?.setTranscriptTextScale(scale)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         .testTag("chat_transcript")
                         .hermexHazeSource(key = "chat-transcript"),
                     state = transcriptListState,
@@ -956,6 +1022,7 @@ fun ChatRoute(
                                     showsResponseSpeed = chatDisplaySettings.showsResponseSpeed,
                                     wrapsCodeBlockLines = chatDisplaySettings.wrapsCodeBlockLines,
                                     streamedTextAnimationEnabled = chatDisplaySettings.streamedTextAnimationEnabled,
+                                    transcriptTextScale = effectiveTranscriptTextScale.floatValue,
                                     loadTranscriptMediaImage = viewModel::transcriptMediaThumbnailData,
                                     loadAttachmentFile = viewModel::attachmentTextFile,
                                     actionContext = actionContext,
@@ -1077,6 +1144,21 @@ fun ChatRoute(
                         ),
                     ),
             )
+            state.activeTurnIndicator()?.let { indicator ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(
+                            start = 14.dp,
+                            end = 70.dp,
+                            bottom = composerHeight + 10.dp,
+                        ),
+                    contentAlignment = Alignment.BottomStart,
+                ) {
+                    ActiveTurnStatusPill(indicator)
+                }
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1123,7 +1205,6 @@ fun ChatRoute(
                             onCancel = viewModel::cancel,
                             onOpenModelPicker = { showsModelPicker = true },
                             onOpenProfilePicker = { showsProfilePicker = true },
-                            onOpenReasoningPicker = { showsReasoningPicker = true },
                             onOpenWorkspacePicker = { showsWorkspacePicker = true },
                             onLoadWorkspaceSuggestions = viewModel::loadWorkspaceSuggestions,
                             onAttach = { showsAttachmentOptions = true },
@@ -1172,7 +1253,10 @@ fun ChatRoute(
             hasRepository = gitState.hasRepository,
             showsFilesButton = chatDisplaySettings.showsChatFilesButton,
             showsGitControls = chatDisplaySettings.showsChatGitControls,
-            onBack = onBack,
+            onBack = {
+                if (isPendingNewChatId(sessionId)) viewModel.abandonPendingComposer()
+                onBack()
+            },
             onOpenWorkspace = onOpenWorkspace,
             onOpenGit = onOpenGit,
             canClearConversation = state.messages.isNotEmpty() &&
@@ -1259,6 +1343,10 @@ fun ChatRoute(
         ModelPickerDialog(
             models = state.modelOptions,
             selected = state.selectedModel,
+            providers = state.providerSummaries,
+            reasoningEfforts = state.reasoningOptions,
+            selectedReasoning = state.selectedReasoning,
+            showsReasoning = state.showsReasoningControl,
             favoriteKeys = favoriteModelKeys,
             recentKeys = recentModelKeys,
             onDismiss = { showsModelPicker = false },
@@ -1280,6 +1368,10 @@ fun ChatRoute(
                     localSettingsRepository?.removeRecentModel(model)
                 }
             },
+            onSelectReasoning = { effort ->
+                showsModelPicker = false
+                viewModel.selectReasoning(effort)
+            },
         )
     }
     if (showsProfilePicker && state.showsProfileControl) {
@@ -1300,17 +1392,7 @@ fun ChatRoute(
             onConfirm = viewModel::confirmProfileSwitchStartingNewSession,
         )
     }
-    if (showsReasoningPicker && state.showsReasoningControl) {
-        ReasoningPickerDialog(
-            efforts = state.reasoningOptions,
-            selected = state.selectedReasoning,
-            onDismiss = { showsReasoningPicker = false },
-            onSelect = { effort ->
-                showsReasoningPicker = false
-                viewModel.selectReasoning(effort)
-            },
-        )
-    }
+
     if (showsWorkspacePicker) {
         WorkspacePickerDialog(
             roots = state.workspaceRoots,
@@ -2050,6 +2132,37 @@ private fun StreamRecoveryStatusPill(label: String) {
 }
 
 @Composable
+private fun ActiveTurnStatusPill(indicator: ActiveTurnIndicator) {
+    val localizedActivity = localizedString(indicator.label)
+    val label = indicator.toolName?.let { "$localizedActivity $it" } ?: localizedActivity
+    Row(
+        modifier = Modifier
+            .hermexGlass(shape = CircleShape, castsShadow = false)
+            .semantics { contentDescription = label }
+            .padding(horizontal = 11.dp, vertical = 7.dp)
+            .testTag("active_turn_indicator"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(13.dp),
+            strokeWidth = 1.7.dp,
+            color = MaterialTheme.colorScheme.secondary,
+            trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
+            strokeCap = StrokeCap.Round,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.secondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun InlineNotice(
     text: String,
     isError: Boolean = false,
@@ -2180,7 +2293,6 @@ private fun ComposerSurface(
     onCancel: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
-    onOpenReasoningPicker: () -> Unit,
     onOpenWorkspacePicker: () -> Unit,
     onLoadWorkspaceSuggestions: (String) -> Unit,
     onAttach: () -> Unit,
@@ -2196,7 +2308,6 @@ private fun ComposerSurface(
     val messageDescription = localizedString("message").replaceFirstChar { character ->
         if (character.isLowerCase()) character.titlecase() else character.toString()
     }
-    val isImeVisible = WindowInsets.isImeVisible
     val slashAutocompleteContext = remember(
         state.modelOptions,
         state.profileOptions,
@@ -2255,6 +2366,17 @@ private fun ComposerSurface(
                     surfaceLevel = HermexSurfaceLevel.Floating,
                 ),
         ) {
+            ComposerModelSelector(
+                model = state.selectedModel,
+                location = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries),
+                onClick = onOpenModelPicker,
+                enabled = (state.selectedModel != null || state.modelOptions.isNotEmpty()) &&
+                    !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+            )
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
             if (state.pendingAttachments.isNotEmpty()) {
                 ComposerAttachmentStrip(
                     attachments = state.pendingAttachments,
@@ -2310,34 +2432,22 @@ private fun ComposerSurface(
                     onClick = onAttach,
                     enabled = !state.isUploadingAttachment && !state.isStreaming && !state.isViewingCachedData,
                 )
-                HermexSelectorPill(
-                    label = state.selectedModel?.label ?: state.selectedModel?.name ?: state.selectedModel?.id ?: "Model",
-                    onClick = onOpenModelPicker,
-                    enabled = (state.selectedModel != null || state.modelOptions.isNotEmpty()) &&
-                        !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                    modifier = Modifier.weight(1f),
-                    glassed = false,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
-                )
-                if (state.showsReasoningControl) {
-                    HermexSelectorPill(
-                        label = ReasoningEffortOption.titleFor(state.selectedReasoning),
-                        onClick = onOpenReasoningPicker,
-                        enabled = state.reasoningOptions.isNotEmpty() && !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                        leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_brain,
-                        minWidth = 84.dp,
-                        maxWidth = 100.dp,
-                        glassed = false,
-                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 10.dp),
-                    )
-                }
                 ComposerInlineIconButton(
-                    label = localizedString("Voice dictation. Long press to record a voice note."),
+                    label = localizedString("Dictate"),
                     iconRes = com.uzairansar.hermex.R.drawable.ic_hermex_mic,
                     onClick = onVoiceDictation,
-                    onLongClick = onVoiceNote,
                     enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRecordingVoiceNote && !state.isTranscribingVoiceNote && !state.isRunningSessionAction,
                 )
+                HermexIconButton(
+                    label = localizedString("Voice note"),
+                    symbol = "♪",
+                    onClick = onVoiceNote,
+                    enabled = !state.isStreaming && !state.isViewingCachedData &&
+                        !state.isRecordingVoiceNote && !state.isTranscribingVoiceNote &&
+                        !isVoiceDictating && !isVoiceDictationTranscribing && !state.isRunningSessionAction,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(Modifier.weight(1f))
                 HermexIconButton(
                     label = localizedString(if (state.isStreaming) "Stop" else "Send"),
                     symbol = if (state.isStreaming) "■" else "↑",
@@ -2383,7 +2493,7 @@ private fun ComposerSurface(
                 }
             }
         }
-        if (!isImeVisible && showSecondaryBar) {
+        if (showSecondaryBar) {
             ComposerSecondaryBar(
                 state = state,
                 onOpenWorkspacePicker = onOpenWorkspacePicker,
@@ -2401,13 +2511,11 @@ private fun ComposerSurface(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerInlineIconButton(
     label: String,
     iconRes: Int,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
     enabled: Boolean,
 ) {
     Image(
@@ -2416,21 +2524,69 @@ private fun ComposerInlineIconButton(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .then(
-                if (onLongClick == null) {
-                    Modifier.clickable(enabled = enabled, onClick = onClick)
-                } else {
-                    Modifier.combinedClickable(
-                        enabled = enabled,
-                        onClick = onClick,
-                        onLongClick = onLongClick,
-                    )
-                },
-            )
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(9.dp),
         colorFilter = ColorFilter.tint(
             MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.82f else 0.34f),
         ),
+    )
+}
+
+@Composable
+private fun ComposerModelSelector(
+    model: ModelSummary?,
+    location: ModelExecutionLocation,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    val title = model?.displayModelTitle?.takeIf { it.isNotBlank() } ?: localizedString("Choose Model")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Model: $title, ${location.label}"
+            }
+            .testTag("chat_model_selector")
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                localizedString("Model"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        ModelExecutionBadge(location)
+        Text(
+            "⌄",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+@Composable
+private fun ModelExecutionBadge(location: ModelExecutionLocation) {
+    Text(
+        location.label,
+        modifier = Modifier
+            .clip(HermexPillShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
     )
 }
 
@@ -2552,6 +2708,16 @@ private fun ComposerSecondaryBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (showsProfile) {
+            HermexSelectorPill(
+                label = state.profileTitle,
+                onClick = onOpenProfilePicker,
+                modifier = Modifier.testTag("chat_profile_selector"),
+                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
         if (showsWorkspace) {
             HermexSelectorPill(
                 label = state.workspaceTitle,
@@ -2560,15 +2726,6 @@ private fun ComposerSecondaryBar(
                 leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_folder,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 modifier = Modifier.testTag("chat_workspace_picker"),
-            )
-        }
-        if (showsProfile) {
-            HermexSelectorPill(
-                label = state.profileTitle,
-                onClick = onOpenProfilePicker,
-                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             )
         }
         contextSnapshot?.let {
@@ -2845,12 +3002,17 @@ private fun AttachmentOptionsSheet(
 private fun ModelPickerDialog(
     models: List<ModelSummary>,
     selected: ModelSummary?,
+    providers: List<ProviderSummary>,
+    reasoningEfforts: List<String>,
+    selectedReasoning: String?,
+    showsReasoning: Boolean,
     favoriteKeys: List<ModelFavoriteKey>,
     recentKeys: List<ModelFavoriteKey>,
     onDismiss: () -> Unit,
     onSelect: (ModelSummary) -> Unit,
     onToggleFavorite: (ModelSummary) -> Unit,
     onDeleteSavedCustom: (ModelSummary) -> Unit,
+    onSelectReasoning: (String) -> Unit,
 ) {
     var searchText by rememberSaveable { mutableStateOf("") }
     var customModelId by rememberSaveable { mutableStateOf("") }
@@ -2912,6 +3074,38 @@ private fun ModelPickerDialog(
                 shape = HermexCardShape,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (showsReasoning) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Text(
+                        localizedString("Reasoning"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        reasoningEfforts.forEach { effort ->
+                            HermexPillButton(
+                                label = localizedString(ReasoningEffortOption.titleFor(effort)),
+                                onClick = { onSelectReasoning(effort) },
+                                enabled = effort != selectedReasoning,
+                                filled = effort == selectedReasoning,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2978,6 +3172,7 @@ private fun ModelPickerDialog(
                                 ) { model ->
                                     ModelOptionRow(
                                         model = model,
+                                        location = ModelExecutionLocationResolver.resolve(model, providers),
                                         selected = model.matchesSelection(selected),
                                         isFavorite = model.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
                                         allowsDelete = group.allowsDelete,
@@ -3051,6 +3246,7 @@ private fun CustomModelEntry(
                         label = provider.name,
                         onClick = { onProviderIdChange(provider.id) },
                         filled = provider.id.equals(providerId.trim(), ignoreCase = true),
+                        modifier = Modifier.testTag("model_provider_choice_${provider.id}"),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
@@ -3124,6 +3320,7 @@ private fun ModelGroupHeader(
 @Composable
 private fun ModelOptionRow(
     model: ModelSummary,
+    location: ModelExecutionLocation,
     selected: Boolean,
     isFavorite: Boolean,
     allowsDelete: Boolean,
@@ -3173,14 +3370,21 @@ private fun ModelOptionRow(
                     )
                 }
                 model.normalizedProvider?.let { provider ->
-                    Text(
-                        provider,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.MiddleEllipsis,
-                    )
-                }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            provider,
+                            modifier = Modifier.weight(1f, fill = false),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.MiddleEllipsis,
+                        )
+                        ModelExecutionBadge(location)
+                    }
+                } ?: ModelExecutionBadge(location)
             }
         }
         TextButton(
@@ -3784,6 +3988,7 @@ private fun MessageRow(
     showsResponseSpeed: Boolean,
     wrapsCodeBlockLines: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
     loadTranscriptMediaImage: suspend (TranscriptMediaReference) -> ByteArray?,
     loadAttachmentFile: suspend (String) -> FileResponse?,
     actionContext: MessageActionContext?,
@@ -3833,6 +4038,7 @@ private fun MessageRow(
                 if (visibleText.isNotBlank() || attachments.isEmpty()) {
                     UserMessageBubble(
                         text = visibleText.ifBlank { "(empty)" },
+                        transcriptTextScale = transcriptTextScale,
                         onShowActions = { showsMessageActions = true },
                     )
                 }
@@ -3869,6 +4075,7 @@ private fun MessageRow(
             showsResponseSpeed = showsResponseSpeed,
             wrapsCodeBlockLines = wrapsCodeBlockLines,
             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+            transcriptTextScale = transcriptTextScale,
             linkPreviewUrl = linkPreviewUrl,
             loadTranscriptMediaImage = loadTranscriptMediaImage,
             onPreviewAttachment = { previewAttachment = it },
@@ -4117,6 +4324,7 @@ private fun AssistantMessageRow(
     showsResponseSpeed: Boolean,
     wrapsCodeBlockLines: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
     linkPreviewUrl: HttpUrl?,
     loadTranscriptMediaImage: suspend (TranscriptMediaReference) -> ByteArray?,
     onPreviewAttachment: (MessageAttachment) -> Unit,
@@ -4167,6 +4375,7 @@ private fun AssistantMessageRow(
                     wrapsCodeBlockLines = wrapsCodeBlockLines,
                     isStreaming = isStreamingMessage,
                     streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                    transcriptTextScale = transcriptTextScale,
                 )
             } else {
                 MarkdownText(
@@ -4174,10 +4383,14 @@ private fun AssistantMessageRow(
                     wrapsCodeBlockLines = wrapsCodeBlockLines,
                     isStreaming = isStreamingMessage,
                     streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                    transcriptTextScale = transcriptTextScale,
                 )
             }
         } else if (attachments.isEmpty() && reasoningTexts.isEmpty() && tools.isEmpty()) {
-            MarkdownText("(empty)")
+            MarkdownText(
+                markdown = "(empty)",
+                transcriptTextScale = transcriptTextScale,
+            )
         }
         linkPreviewUrl?.let { url ->
             TranscriptLinkPreviewCard(url = url)
@@ -4201,6 +4414,7 @@ private fun TranscriptMediaContentView(
     wrapsCodeBlockLines: Boolean,
     isStreaming: Boolean,
     streamedTextAnimationEnabled: Boolean,
+    transcriptTextScale: Float,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEach { segment ->
@@ -4212,6 +4426,7 @@ private fun TranscriptMediaContentView(
                             wrapsCodeBlockLines = wrapsCodeBlockLines,
                             isStreaming = isStreaming,
                             streamedTextAnimationEnabled = streamedTextAnimationEnabled,
+                            transcriptTextScale = transcriptTextScale,
                         )
                     }
                 }
@@ -5794,9 +6009,14 @@ private fun Modifier.messageActionsGesture(
 @Composable
 private fun UserMessageBubble(
     text: String,
+    transcriptTextScale: Float,
     onShowActions: () -> Unit,
 ) {
     val bubbleShape = RoundedCornerShape(20.dp)
+    val userMessageStyle = MaterialTheme.typography.bodyLarge.copy(
+        fontSize = MaterialTheme.typography.bodyLarge.fontSize * transcriptTextScale,
+        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * transcriptTextScale,
+    )
     Column(
         modifier = Modifier
             .widthIn(max = 520.dp)
@@ -5813,7 +6033,7 @@ private fun UserMessageBubble(
         SelectionContainer {
             Text(
                 text,
-                style = MaterialTheme.typography.bodyLarge,
+                style = userMessageStyle,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }

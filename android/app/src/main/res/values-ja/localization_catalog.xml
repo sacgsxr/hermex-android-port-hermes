@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"拒否"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"詳細"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"破棄"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"ブラウザで APK をダウンロードし、タップしてインストールしてください。Hermex が更新を自動的にインストールすることはありません。"</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"アップデートをダウンロード"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"ファイルの変更"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"フィルター"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"Hermex ??????????????????????????????????????????????????????? Cookie?????????????????"</string>

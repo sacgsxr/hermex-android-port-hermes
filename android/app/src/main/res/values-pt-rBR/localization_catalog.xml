@@ -1361,6 +1361,8 @@
     <string name="l10n_53577bb5df0ee9b6" formatted="false">"Negar"</string>
     <string name="l10n_dc3decbb93847518" formatted="false">"Detalhes"</string>
     <string name="l10n_36fff63ccbcd7bf9" formatted="false">"Descartar"</string>
+    <string name="l10n_cb5759610697bd05" formatted="false">"Baixe o APK no navegador e toque nele para instalar. O Hermex nunca instala atualizações silenciosamente."</string>
+    <string name="l10n_870d57b0e882a552" formatted="false">"Baixar atualização"</string>
     <string name="l10n_663da9347806aa18" formatted="false">"Alterações de arquivos"</string>
     <string name="l10n_96e578211aa29531" formatted="false">"Filtros"</string>
     <string name="l10n_1ce5eec83a4626a6" formatted="false">"O Hermex n?o conseguiu abrir os dados criptografados da conta. A redefini??o remover? deste dispositivo os servidores salvos, cookies de login e cabe?alhos personalizados."</string>

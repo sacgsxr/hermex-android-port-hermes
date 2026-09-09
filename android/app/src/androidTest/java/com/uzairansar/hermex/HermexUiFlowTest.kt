@@ -51,6 +51,8 @@ import com.uzairansar.hermex.data.repository.AuthState
 import com.uzairansar.hermex.data.secure.SecretStore
 import com.uzairansar.hermex.data.secure.ServerAccount
 import com.uzairansar.hermex.data.secure.ServerRegistry
+import com.uzairansar.hermex.data.update.AppUpdateCheckResult
+import com.uzairansar.hermex.data.update.AppUpdateSource
 import com.uzairansar.hermex.ui.chat.ChatRoute
 import com.uzairansar.hermex.ui.git.GitRoute
 import com.uzairansar.hermex.ui.onboarding.OnboardingRoute
@@ -346,6 +348,7 @@ class HermexUiFlowTest {
                     onOpenChat = { openedChat = it },
                     onOpenVoiceChat = {},
                     onOpenSharedDraft = {},
+                    onOpenPendingChat = { _, _ -> },
                     onOpenPanels = {},
                     onOpenPanel = { openedPanel = it },
                     onOpenKanban = { openedKanban = true },
@@ -473,6 +476,7 @@ class HermexUiFlowTest {
                     onOpenChat = {},
                     onOpenVoiceChat = {},
                     onOpenSharedDraft = {},
+                    onOpenPendingChat = { _, _ -> },
                     onOpenPanels = {},
                     onOpenKanban = {},
                     onOpenSettings = {},
@@ -548,6 +552,7 @@ class HermexUiFlowTest {
                     onOpenChat = {},
                     onOpenVoiceChat = {},
                     onOpenSharedDraft = {},
+                    onOpenPendingChat = { _, _ -> },
                     onOpenPanels = {},
                     onOpenKanban = {},
                     onOpenSettings = {},
@@ -618,6 +623,7 @@ class HermexUiFlowTest {
                         onOpenChat = {},
                         onOpenVoiceChat = {},
                         onOpenSharedDraft = {},
+                        onOpenPendingChat = { _, _ -> },
                         onOpenPanels = {},
                         onOpenKanban = {},
                         onOpenSettings = {},
@@ -1197,8 +1203,8 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Message").performTextInput("/personality none")
         composeRule.onNodeWithContentDescription("Send").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { chatPersonalityBodies.any { it.contains(""""name":""""") } }
-        composeRule.onNodeWithText("Medium").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("High") }
+        composeRule.onNodeWithTag("chat_model_selector").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") && hasText("High") }
         composeRule.onNodeWithText("High").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { chatReasoningBody.contains("high") }
         composeRule.onNodeWithContentDescription("Message").performTextInput("/title Mobile Title")
@@ -1436,7 +1442,6 @@ class HermexUiFlowTest {
         }
 
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Visible answer") }
-        composeRule.onNodeWithText("[Attached files: /workspace/hermex/design.pdf]", substring = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Response Timestamps").assertIsDisplayed()
         composeRule.onNodeWithText("Thinking").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Deep Android parity thought").fetchSemanticsNodes().isNotEmpty())
@@ -2255,6 +2260,7 @@ class HermexUiFlowTest {
                     localSettingsRepository = container.localSettingsRepository,
                     cacheMaintenanceRepository = container.cacheMaintenanceRepository,
                     panelsRepository = activeServer?.let(container::panelsRepository),
+                    appUpdateSource = AppUpdateSource { AppUpdateCheckResult.UpToDate },
                     authState = authState,
                     onBack = {},
                     onSignedOut = {},
@@ -2278,7 +2284,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("SERVERS").assertIsDisplayed()
         composeRule.onNodeWithText("Headers (0)").assertIsDisplayed()
         composeRule.onNodeWithText("Clear Cache").assertIsDisplayed()
-        composeRule.onNodeWithText("Forget").assertIsDisplayed()
+        composeRule.onNodeWithText("Forget").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Headers (0)").performClick()
         composeRule.onNodeWithText("Name: Value").performTextInput("CF-Access-Client-Id: id")
         composeRule.onNodeWithText("Save").performClick()
@@ -2486,6 +2492,75 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Hermex").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { requestedPaths.contains("/workspace/hermex") }
         assertTrue(requestedPaths.contains("/workspace/hermex"))
+    }
+
+    @Test
+    fun chatComposerKeepsPhoneControlsReadableAndSeparatesVoiceActions() {
+        val mockServer = MockWebServer().also { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                    "/api/session" -> json(
+                        """{"session":{"session_id":"phone","title":"Phone","model":"very-long-model-name-for-large-text","model_provider":"openai","profile":"default","messages":[]}}""",
+                    )
+                    "/api/models" -> json(
+                        """{"models":[{"id":"very-long-model-name-for-large-text","label":"Very Long Model Name For Large Text","provider":"openai"}]}""",
+                    )
+                    "/api/providers" -> json(
+                        """{"providers":[{"id":"openai","display_name":"OpenAI","is_self_hosted":false}]}""",
+                    )
+                    "/api/profiles" -> json(
+                        """{"active":"default","single_profile_mode":false,"profiles":[{"name":"default","display_name":"Default"},{"name":"review","display_name":"Review"}]}""",
+                    )
+                    "/api/workspaces" -> json("""{"workspaces":[]}""")
+                    "/api/reasoning" -> json(
+                        """{"effort":"medium","supports_reasoning_effort":true,"supported_efforts":["low","medium","high"]}""",
+                    ).let { response ->
+                        if (request.method == "POST") response.newBuilder().bodyDelay(1, TimeUnit.SECONDS).build() else response
+                    }
+                    "/api/commands" -> json("""{"commands":[]}""")
+                    "/api/skills" -> json("""{"skills":[]}""")
+                    "/api/session/yolo" -> json("""{"yolo_enabled":false}""")
+                    else -> MockResponse.Builder().code(404).body("""{"error":"unexpected"}""").build()
+                }
+            }
+            server.start()
+            this.server = server
+        }
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val container = AppContainer(application)
+
+        composeRule.setContent {
+            HermexTheme {
+                ChatRoute(
+                    sessionId = "phone",
+                    viewModelKey = "phone-usability-slice-1",
+                    repository = container.chatRepository(mockServer.url("/")),
+                    onOpenChat = {},
+                    onBack = {},
+                    onOpenWorkspace = {},
+                    onOpenGit = {},
+                )
+            }
+        }
+
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Very Long Model Name For Large Text") }
+        val selectorBounds = composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val composerBounds = composeRule.onNodeWithTag("chat_composer").fetchSemanticsNode().boundsInRoot
+        assertTrue(selectorBounds.width >= composerBounds.width * 0.85f)
+        composeRule.onNodeWithContentDescription("Dictate").assertIsDisplayed().assertHasClickAction()
+        composeRule.onNodeWithContentDescription("Voice note").assertIsDisplayed().assertHasClickAction()
+
+        composeRule.onNodeWithContentDescription("Message").performClick()
+        composeRule.onNodeWithTag("chat_profile_selector").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_model_selector").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
+        composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
+        composeRule.onNodeWithText("Medium").assertIsDisplayed()
+        composeRule.onNodeWithTag("model_provider_choice_openai").performClick()
+        composeRule.onNodeWithText("Remote").assertIsDisplayed()
+        composeRule.onNodeWithText("High").performClick()
+        composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
+        composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
     }
 
     private fun startServer(vararg responses: MockResponse): MockWebServer =

@@ -39,6 +39,9 @@ import com.uzairansar.hermex.data.repository.CacheMaintenanceRepository
 import com.uzairansar.hermex.data.repository.PanelsRepository
 import com.uzairansar.hermex.data.secure.ServerAccount
 import com.uzairansar.hermex.data.secure.ServerRegistrySnapshot
+import com.uzairansar.hermex.data.update.AppUpdateSource
+import com.uzairansar.hermex.data.update.AppUpdateUiState
+import com.uzairansar.hermex.data.update.toUiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -112,6 +115,7 @@ data class SettingsUiState(
     val profileCreateError: String? = null,
     val serverSettings: SettingsResponse? = null,
     val serverUpdateState: WebUiUpdateState? = null,
+    val appUpdateState: AppUpdateUiState = AppUpdateUiState.NotChecked,
     val isCheckingForUpdates: Boolean = false,
     val forcedUpdateCheckOutcome: ForcedUpdateCheckOutcome? = null,
     val showForcedUpdateCheckResult: Boolean = false,
@@ -194,6 +198,7 @@ class SettingsViewModel(
     private val localSettingsRepository: LocalSettingsRepository,
     private val cacheMaintenanceRepository: CacheMaintenanceRepository?,
     private val panelsRepository: PanelsRepository?,
+    private val appUpdateSource: AppUpdateSource,
     private val savedStateHandle: SavedStateHandle? = null,
 ) : ViewModel() {
     private val initialServerSnapshot = authRepository.servers.value
@@ -240,6 +245,7 @@ class SettingsViewModel(
     private var cliSessionsSaveJob: Job? = null
     private var cliSessionsSaveGeneration = 0L
     private var claudeCodeSessionsSaveJob: Job? = null
+    private var appUpdateJob: Job? = null
     private var claudeCodeSessionsSaveGeneration = 0L
 
     init {
@@ -1150,6 +1156,27 @@ class SettingsViewModel(
                 .onSuccess { _state.update { it.copy(isMaintainingCache = false, notice = "Expired cache cleaned up.") } }
                 .onFailure { error ->
                     _state.update { it.copy(isMaintainingCache = false, error = error.message ?: "Could not clean up cache.") }
+                }
+        }
+    }
+
+    fun checkForAppUpdates() {
+        if (_state.value.appUpdateState == AppUpdateUiState.Checking) return
+        appUpdateJob?.cancel()
+        _state.update { it.copy(appUpdateState = AppUpdateUiState.Checking) }
+        appUpdateJob = viewModelScope.launch {
+            runSuspendCatching { appUpdateSource.check() }
+                .onSuccess { result ->
+                    _state.update {
+                        it.copy(
+                            appUpdateState = result.toUiState(),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(appUpdateState = AppUpdateUiState.Error("Could not check GitHub for app updates."))
+                    }
                 }
         }
     }

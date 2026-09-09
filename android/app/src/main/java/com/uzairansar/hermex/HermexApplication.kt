@@ -20,6 +20,7 @@ import com.uzairansar.hermex.data.secure.AndroidSecretStore
 import com.uzairansar.hermex.data.secure.ServerRegistry
 import com.uzairansar.hermex.data.secure.UnavailableSecretStore
 import com.uzairansar.hermex.data.share.SharedDraftStore
+import com.uzairansar.hermex.data.update.AppUpdateChecker
 import com.uzairansar.hermex.ui.chat.StreamRecoveryService
 import com.uzairansar.hermex.ui.createExportDirectory
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,7 @@ class AppContainer(private val application: Application) {
     val secureStorageFailure: Throwable? = secretStoreResult.exceptionOrNull() ?: registry.loadFailure
     val localSettingsRepository = LocalSettingsRepository(application)
     val sharedDraftStore = SharedDraftStore(application)
+    val appUpdateChecker = AppUpdateChecker()
     private val cookieJar = PersistentCookieJar(secretStore)
     private val okHttpClient = OkHttpClient.Builder()
         .cookieJar(cookieJar)

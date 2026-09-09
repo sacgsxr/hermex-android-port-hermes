@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color as AndroidColor
+import android.net.Uri
 import androidx.annotation.DrawableRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Spring
@@ -103,6 +104,7 @@ import com.uzairansar.hermex.core.model.SessionExportFormat
 import com.uzairansar.hermex.core.model.ProfileSummary
 import com.uzairansar.hermex.core.model.SessionSummary
 import com.uzairansar.hermex.data.repository.AuthState
+import com.uzairansar.hermex.data.update.AppUpdateUiState
 import com.uzairansar.hermex.ui.ShortcutDestination
 import com.uzairansar.hermex.ui.ProfileShortcutPublisher
 import com.uzairansar.hermex.ui.SavedStatePolicy
@@ -139,6 +141,7 @@ fun SessionListRoute(
     onOpenChat: (String) -> Unit,
     onOpenVoiceChat: (String) -> Unit,
     onOpenSharedDraft: (String) -> Unit,
+    onOpenPendingChat: (SessionOpenDestination, String?) -> Unit,
     onOpenPanels: () -> Unit,
     onOpenPanel: (String) -> Unit = { onOpenPanels() },
     onOpenKanban: () -> Unit,
@@ -159,6 +162,7 @@ fun SessionListRoute(
                     repository = container.sessionRepository(loggedIn.server),
                     panelsRepository = container.panelsRepository(loggedIn.server),
                     localSettingsRepository = container.localSettingsRepository,
+                    appUpdateSource = container.appUpdateChecker,
                     serverId = loggedIn.server.toString(),
                 ) as T
             }
@@ -169,6 +173,7 @@ fun SessionListRoute(
                     repository = container.sessionRepository(loggedIn.server),
                     panelsRepository = container.panelsRepository(loggedIn.server),
                     localSettingsRepository = container.localSettingsRepository,
+                    appUpdateSource = container.appUpdateChecker,
                     serverId = loggedIn.server.toString(),
                     savedStateHandle = extras.createSavedStateHandle(),
                 ) as T
@@ -288,7 +293,7 @@ fun SessionListRoute(
         if (!shortcutConsumed && shortcutAction == ShortcutDestination.ShareAction) {
             shortcutConsumed = true
             if (container.sharedDraftStore.hasPendingDraft()) {
-                viewModel.createSession(destination = SessionOpenDestination.SharedDraft)
+                onOpenPendingChat(SessionOpenDestination.SharedDraft, null)
             }
         } else if (!shortcutConsumed && shortcutAction != null && pendingShortcutAction == null) {
             pendingShortcutAction = shortcutAction
@@ -344,6 +349,16 @@ fun SessionListRoute(
                         onClear = viewModel::clearSearch,
                         onSettings = onOpenSettings,
                     )
+                }
+                val availableUpdate = state.appUpdateState as? AppUpdateUiState.UpdateAvailable
+                if (availableUpdate != null && !state.isAppUpdateBannerDismissed) {
+                    item {
+                        AppUpdateBanner(
+                            versionName = availableUpdate.metadata.versionName,
+                            onDownload = { openAppUpdateDownload(context, availableUpdate.metadata.apkUrl) },
+                            onDismiss = viewModel::dismissAppUpdateBanner,
+                        )
+                    }
                 }
                 if (state.showArchived) {
                     item {
@@ -470,7 +485,7 @@ fun SessionListRoute(
 
         if (!searchExpanded) {
             NewChatFloatingButton(
-                onClick = { viewModel.createSession() },
+                onClick = { onOpenPendingChat(SessionOpenDestination.Chat, null) },
                 enabled = !state.isMutating,
                 tintColor = primaryActionTintColor,
                 compact = usesCompactFloatingAction,
@@ -501,9 +516,9 @@ fun SessionListRoute(
                         pendingShortcutAction = null
                         shortcutConsumed = true
                         when {
-                            isVoice -> viewModel.createSession(destination = SessionOpenDestination.VoiceChat)
-                            isProfile -> viewModel.createSession(profile = shortcutProfile)
-                            else -> viewModel.createSession()
+                            isVoice -> onOpenPendingChat(SessionOpenDestination.VoiceChat, null)
+                            isProfile -> onOpenPendingChat(SessionOpenDestination.Chat, shortcutProfile)
+                            else -> onOpenPendingChat(SessionOpenDestination.Chat, null)
                         }
                     },
                 ) { Text(localizedString("Continue")) }
@@ -1541,8 +1556,41 @@ private fun StatusStack(state: SessionListUiState) {
 }
 
 @Composable
+private fun AppUpdateBanner(
+    versionName: String,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .hermexGlass(shape = HermexCardShape, castsShadow = false)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Hermex $versionName is available", style = MaterialTheme.typography.titleSmall)
+        Text(
+            localizedString("Download the APK in your browser, then tap it to install. Hermex never installs updates silently."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HermexPillButton(label = localizedString("Download update"), onClick = onDownload, filled = true)
+            HermexPillButton(label = localizedString("Dismiss"), onClick = onDismiss)
+        }
+    }
+}
+
+@Composable
 private fun StatusLine(text: String, color: Color) {
     Text(text, color = color, style = MaterialTheme.typography.bodySmall)
+}
+
+private fun openAppUpdateDownload(context: Context, apkUrl: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

@@ -1,0 +1,264 @@
+name: Android Streaming Jitter Release Prep
+
+on:
+  push:
+    branches:
+      - fix/streaming-jitter
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-streaming-jitter-release-prep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-package:
+    name: Verify and package signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EXPECTED_VERSION_CODE: "36"
+      EXPECTED_VERSION_NAME: "1.1.3-clay.3"
+      EXPECTED_SIGNING_CERT_SHA256: "3c46c0ed82a8ff7f9ca27f7881fd5c98f77092e2fe4a37c608bc32c57ac4af84"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Validate release identity
+        run: |
+          set -euo pipefail
+          version_name="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' android/app/build.gradle.kts)"
+          version_code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)/\1/p' android/app/build.gradle.kts)"
+          test "$version_name" = "$EXPECTED_VERSION_NAME"
+          test "$version_code" = "$EXPECTED_VERSION_CODE"
+          echo "ANDROID_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+
+      - name: Verify endpoint parity
+        if: ${{ !cancelled() }}
+        run: python3 ci/endpoint_parity.py
+
+      - name: Verify localization catalog parity
+        if: ${{ !cancelled() }}
+        run: |
+          python3 ci/generate_android_localization_catalog.py --check
+          python3 ci/migrate_android_compose_literals.py --check
+
+      - name: Run full Android unit tests
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
+      - name: Run Android debug lint
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: ./gradlew lintDebug
+
+      - name: Compile debug instrumentation tests
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: ./gradlew compileDebugAndroidTestKotlin
+
+      - name: Run focused API 35 managed-device tests
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: |
+          ./gradlew pixel2api35DebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class='com.uzairansar.hermex.HermexUiFlowTest#chatPendingPromptsStayBetweenTopBarAndComposer,com.uzairansar.hermex.HermexUiFlowTest#chatRouteKeepsUserPositionWhenStreamUpdatesAfterUpwardDrag'
+
+      - name: Prepare Android release signing
+        if: ${{ !cancelled() }}
+        env:
+          HERMEX_ANDROID_KEYSTORE_BASE64: ${{ secrets.HERMEX_ANDROID_KEYSTORE_BASE64 }}
+          HERMEX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HERMEX_ANDROID_KEYSTORE_PASSWORD }}
+          HERMEX_ANDROID_KEY_ALIAS: ${{ secrets.HERMEX_ANDROID_KEY_ALIAS }}
+          HERMEX_ANDROID_KEY_PASSWORD: ${{ secrets.HERMEX_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in \
+            HERMEX_ANDROID_KEYSTORE_BASE64 \
+            HERMEX_ANDROID_KEYSTORE_PASSWORD \
+            HERMEX_ANDROID_KEY_ALIAS \
+            HERMEX_ANDROID_KEY_PASSWORD; do
+            if [ -z "${!value:-}" ]; then
+              echo "Missing required signing secret: $value"
+              exit 1
+            fi
+          done
+          keystore_path="$RUNNER_TEMP/hermex-android-release.jks"
+          printf '%s' "$HERMEX_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "HERMEX_ANDROID_KEYSTORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+          echo "HERMEX_ANDROID_KEYSTORE_PASSWORD=$HERMEX_ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "HERMEX_ANDROID_KEY_ALIAS=$HERMEX_ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "HERMEX_ANDROID_KEY_PASSWORD=$HERMEX_ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        if: ${{ !cancelled() }}
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Verify and stage signed release artifacts
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error::$*"
+            exit 1
+          }
+
+          apk_path="$GITHUB_WORKSPACE/android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -s "$apk_path" ]; then
+            fail "Signed release APK is missing or empty: $apk_path"
+          fi
+
+          diagnostic_dir="$GITHUB_WORKSPACE/android-verification-diagnostics"
+          mkdir -p "$diagnostic_dir"
+          echo "APK path: $apk_path"
+          echo "APK size: $(stat --format='%s bytes' "$apk_path")"
+
+          build_tools_root="${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools"
+          mapfile -t build_tool_dirs < <(find "$build_tools_root" -mindepth 1 -maxdepth 1 -type d -print | sort -V)
+          if [ "${#build_tool_dirs[@]}" -eq 0 ]; then
+            fail "No installed Android build-tools found under $build_tools_root"
+          fi
+          build_tools_dir="${build_tool_dirs[${#build_tool_dirs[@]}-1]}"
+          aapt2="$build_tools_dir/aapt2"
+          apksigner="$build_tools_dir/apksigner"
+          [ -x "$aapt2" ] || fail "aapt2 is unavailable or not executable: $aapt2"
+          [ -x "$apksigner" ] || fail "apksigner is unavailable or not executable: $apksigner"
+          echo "Android build-tools: $build_tools_dir"
+
+          badging="$diagnostic_dir/hermex-apk-badging.txt"
+          if ! "$aapt2" dump badging "$apk_path" > "$badging" 2>&1; then
+            printf '%s\n' "--- aapt2 dump badging ---"
+            printf '%s\n' "$(<"$badging")"
+            fail "aapt2 could not read APK package metadata"
+          fi
+          package_line="$(grep -m1 '^package: ' "$badging" || true)"
+          echo "APK package metadata: ${package_line:-<missing package line>}"
+          echo "Expected package metadata: name='com.uzairansar.hermex' versionName='$ANDROID_VERSION_NAME' versionCode='$ANDROID_VERSION_CODE'"
+          [ -n "$package_line" ] || fail "APK metadata does not contain a package line"
+          [[ "$package_line" == *"name='com.uzairansar.hermex'"* ]] || fail "APK package name does not equal com.uzairansar.hermex"
+          [[ "$package_line" == *"versionName='$ANDROID_VERSION_NAME'"* ]] || fail "APK versionName does not equal $ANDROID_VERSION_NAME"
+          [[ "$package_line" == *"versionCode='$ANDROID_VERSION_CODE'"* ]] || fail "APK versionCode does not equal $ANDROID_VERSION_CODE"
+
+          signer_output="$diagnostic_dir/hermex-apk-signer.txt"
+          if ! "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output" 2>&1; then
+            printf '%s\n' "--- apksigner verification output ---"
+            printf '%s\n' "$(<"$signer_output")"
+            fail "apksigner rejected the APK"
+          fi
+          printf '%s\n' "--- apksigner verification output (certificate metadata is public) ---"
+          printf '%s\n' "$(<"$signer_output")"
+          apk_digest="$(python3 - "$signer_output" <<'PY'
+          import re
+          import sys
+
+          output = open(sys.argv[1], encoding="utf-8").read()
+          match = re.search(
+              r"^\s*(?:Signer #1|V\d+ Signer): certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$",
+              output,
+              re.MULTILINE,
+          )
+          print(re.sub(r"[^0-9a-f]", "", match.group(1).lower()) if match else "")
+          PY
+          )"
+
+          keystore_cert_der="$diagnostic_dir/hermex-keystore-cert.der"
+          if ! keytool -exportcert \
+            -keystore "$HERMEX_ANDROID_KEYSTORE_FILE" \
+            -storepass:env HERMEX_ANDROID_KEYSTORE_PASSWORD \
+            -alias "$HERMEX_ANDROID_KEY_ALIAS" \
+            -file "$keystore_cert_der" > "$diagnostic_dir/hermex-keytool-export.txt" 2>&1; then
+            printf '%s\n' "$(<"$diagnostic_dir/hermex-keytool-export.txt")"
+            fail "Could not export the configured keystore certificate"
+          fi
+          keystore_digest="$(python3 - "$keystore_cert_der" <<'PY'
+          import hashlib
+          import sys
+
+          with open(sys.argv[1], "rb") as certificate:
+              print(hashlib.sha256(certificate.read()).hexdigest())
+          PY
+          )"
+
+          echo "APK signer certificate SHA-256: ${apk_digest:-<missing>}"
+          echo "Configured keystore certificate SHA-256: ${keystore_digest:-<missing>}"
+          echo "Expected Clay certificate SHA-256: $EXPECTED_SIGNING_CERT_SHA256"
+          [ "${#apk_digest}" -eq 64 ] || fail "Could not extract a valid signer certificate SHA-256 from apksigner output"
+          [ "${#keystore_digest}" -eq 64 ] || fail "Could not compute a valid SHA-256 for the exported keystore DER certificate"
+          [ "$keystore_digest" = "$EXPECTED_SIGNING_CERT_SHA256" ] || fail "Configured keystore certificate does not match the expected Clay signing certificate"
+          [ "$apk_digest" = "$keystore_digest" ] || fail "APK signer certificate does not match the configured keystore certificate"
+          [ "$apk_digest" = "$EXPECTED_SIGNING_CERT_SHA256" ] || fail "APK signer certificate does not match the expected Clay signing certificate"
+
+          release_dir="$GITHUB_WORKSPACE/android-release"
+          mkdir -p "$release_dir"
+          cp "$apk_path" "$release_dir/app-release.apk"
+          apk_sha256="$(sha256sum "$release_dir/app-release.apk" | cut -d ' ' -f1)"
+          export RELEASE_JSON_PATH="$release_dir/release.json"
+          export RELEASE_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/android-v${ANDROID_VERSION_NAME}/app-release.apk"
+          export RELEASE_APK_SHA256="$apk_sha256"
+          python3 - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "versionCode": int(os.environ["ANDROID_VERSION_CODE"]),
+              "versionName": os.environ["ANDROID_VERSION_NAME"],
+              "packageName": "com.uzairansar.hermex",
+              "apkUrl": os.environ["RELEASE_APK_URL"],
+              "sha256": os.environ["RELEASE_APK_SHA256"],
+          }
+          with open(os.environ["RELEASE_JSON_PATH"], "w", encoding="utf-8") as output:
+              json.dump(payload, output, indent=2)
+              output.write("\n")
+          PY
+          (cd "$release_dir" && sha256sum app-release.apk release.json > SHA256SUMS.txt)
+
+      - name: Upload signed release artifacts
+        if: success()
+        uses: actions/upload-artifact@v5
+        with:
+          name: hermex-android-1.1.3-clay.3-signed
+          if-no-files-found: error
+          path: android-release
+
+      - name: Upload unverified APK diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: hermex-android-1.1.3-clay.3-UNVERIFIED-diagnostic
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android-verification-diagnostics
+
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: hermex-android-1.1.3-clay.3-reports
+          if-no-files-found: warn
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest
+            android/app/build/test-results/testDebugUnitTest
+            android/app/build/reports/lint-results-debug.*
+            android/app/build/reports/androidTests/managedDevice
+            android/app/build/outputs/androidTest-results/managedDevice
