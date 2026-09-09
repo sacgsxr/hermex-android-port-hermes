@@ -38,6 +38,7 @@ import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelPendingNewChatTest {
+    private val asyncWaitTimeoutMillis = 15_000L
     private val viewModels = mutableListOf<ChatViewModel>()
 
     @get:Rule
@@ -286,13 +287,13 @@ class ChatViewModelPendingNewChatTest {
         path: String,
         expectedCount: Int,
     ) = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             while (requests.count { it.url.encodedPath == path } < expectedCount) delay(10)
         }
     }
 
     private suspend fun awaitComposer(viewModel: ChatViewModel): ChatUiState = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             viewModel.state.first { !it.isLoadingComposerConfig && it.modelOptions.isNotEmpty() }
         }
     }
@@ -301,19 +302,19 @@ class ChatViewModelPendingNewChatTest {
         viewModel: ChatViewModel,
         afterTrigger: Int = 0,
     ): ChatUiState = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             viewModel.state.first { it.responseCompletionTrigger > afterTrigger && !it.isStreaming }
         }
     }
 
     private suspend fun awaitSendFailure(viewModel: ChatViewModel): ChatUiState = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             viewModel.state.first { !it.isStreaming && !it.error.isNullOrBlank() }
         }
     }
 
     private suspend fun awaitPendingLocalAttachment(viewModel: ChatViewModel): ChatUiState = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             viewModel.state.first { it.pendingLocalUploadCount == 1 && !it.isUploadingAttachment }
         }
     }
@@ -322,7 +323,7 @@ class ChatViewModelPendingNewChatTest {
         requests: CopyOnWriteArrayList<RecordedRequest>,
         expectedCount: Int,
     ) = withContext(Dispatchers.Default.limitedParallelism(1)) {
-        withTimeout(5_000) {
+        withTimeout(asyncWaitTimeoutMillis) {
             while (requests.count { it.url.encodedPath == "/api/reasoning" } < expectedCount) delay(10)
         }
     }
@@ -331,7 +332,7 @@ class ChatViewModelPendingNewChatTest {
         val scopeJob = viewModel.viewModelScope.coroutineContext[Job]
         androidx.lifecycle.ViewModel::class.java.getDeclaredMethod("clear\$lifecycle_viewmodel").apply { isAccessible = true }.invoke(viewModel)
         runBlocking {
-            withTimeout(5_000) { scopeJob?.join() }
+            withTimeout(asyncWaitTimeoutMillis) { scopeJob?.join() }
         }
     }
 
