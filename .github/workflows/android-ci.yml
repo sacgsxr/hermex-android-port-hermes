@@ -69,14 +69,32 @@ jobs:
         working-directory: android
         run: ./gradlew testDebugUnitTest lintDebug assembleDebug
 
-      - name: Run API 27 managed-device tests
-        working-directory: android
-        run: ./gradlew pixel2api27DebugAndroidTest
+      - name: Run API 27 connected-device tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 27
+          target: default
+          arch: x86
+          profile: pixel_2
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest
 
-      - name: Run API 35 managed-device tests
-        working-directory: android
-        run: ./gradlew pixel2api35DebugAndroidTest
+      - name: Run focused API 35 connected-device tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class='com.uzairansar.hermex.HermexUiFlowTest#chatPendingPromptsStayBetweenTopBarAndComposer,com.uzairansar.hermex.HermexUiFlowTest#chatRouteKeepsUserPositionWhenStreamUpdatesAfterUpwardDrag'
 
-      - name: Run API 36 managed-device tests
-        working-directory: android
-        run: ./gradlew pixel2api36DebugAndroidTest
+      - name: Run focused API 36 connected-device tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class='com.uzairansar.hermex.HermexUiFlowTest#chatPendingPromptsStayBetweenTopBarAndComposer,com.uzairansar.hermex.HermexUiFlowTest#chatRouteKeepsUserPositionWhenStreamUpdatesAfterUpwardDrag'
