@@ -1443,8 +1443,7 @@ class HermexUiFlowTest {
 
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Visible answer") }
         composeRule.onNodeWithTag("chat_transcript")
-            .performScrollToNode(hasSemanticsText("/workspace/hermex/design.pdf", substring = true))
-        composeRule.onNodeWithText("/workspace/hermex/design.pdf", substring = true).assertIsDisplayed()
+            .performScrollToNode(hasSemanticsText("design.pdf"))
         composeRule.onNodeWithText("design.pdf").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Response Timestamps").assertIsDisplayed()
         composeRule.onNodeWithText("Thinking").assertIsDisplayed()
