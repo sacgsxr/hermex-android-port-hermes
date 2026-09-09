@@ -1442,6 +1442,8 @@ class HermexUiFlowTest {
         }
 
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Visible answer") }
+        composeRule.onNodeWithTag("chat_transcript")
+            .performScrollToNode(hasSemanticsText("[Attached files: /workspace/hermex/design.pdf]", substring = true))
         composeRule.onNodeWithText("[Attached files: /workspace/hermex/design.pdf]", substring = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Response Timestamps").assertIsDisplayed()
         composeRule.onNodeWithText("Thinking").assertIsDisplayed()
@@ -2285,7 +2287,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("SERVERS").assertIsDisplayed()
         composeRule.onNodeWithText("Headers (0)").assertIsDisplayed()
         composeRule.onNodeWithText("Clear Cache").assertIsDisplayed()
-        composeRule.onNodeWithText("Forget").assertIsDisplayed()
+        composeRule.onNodeWithText("Forget").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Headers (0)").performClick()
         composeRule.onNodeWithText("Name: Value").performTextInput("CF-Access-Client-Id: id")
         composeRule.onNodeWithText("Save").performClick()
@@ -2552,7 +2554,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Voice note").assertIsDisplayed().assertHasClickAction()
 
         composeRule.onNodeWithContentDescription("Message").performClick()
-        composeRule.onNodeWithText("Default").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_profile_selector").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_model_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()

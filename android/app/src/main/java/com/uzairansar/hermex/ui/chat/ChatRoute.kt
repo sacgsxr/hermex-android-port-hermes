@@ -2712,6 +2712,7 @@ private fun ComposerSecondaryBar(
             HermexSelectorPill(
                 label = state.profileTitle,
                 onClick = onOpenProfilePicker,
+                modifier = Modifier.testTag("chat_profile_selector"),
                 enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
                 leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
