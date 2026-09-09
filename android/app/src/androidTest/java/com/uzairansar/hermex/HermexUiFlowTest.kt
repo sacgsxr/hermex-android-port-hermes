@@ -1443,8 +1443,9 @@ class HermexUiFlowTest {
 
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Visible answer") }
         composeRule.onNodeWithTag("chat_transcript")
-            .performScrollToNode(hasSemanticsText("[Attached files: /workspace/hermex/design.pdf]", substring = true))
-        composeRule.onNodeWithText("[Attached files: /workspace/hermex/design.pdf]", substring = true).assertIsDisplayed()
+            .performScrollToNode(hasSemanticsText("/workspace/hermex/design.pdf", substring = true))
+        composeRule.onNodeWithText("/workspace/hermex/design.pdf", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("design.pdf").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Response Timestamps").assertIsDisplayed()
         composeRule.onNodeWithText("Thinking").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Deep Android parity thought").fetchSemanticsNodes().isNotEmpty())
@@ -2559,7 +2560,7 @@ class HermexUiFlowTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
-        composeRule.onNodeWithText("openai").performClick()
+        composeRule.onNodeWithTag("model_provider_choice_openai").performClick()
         composeRule.onNodeWithText("Remote").assertIsDisplayed()
         composeRule.onNodeWithText("High").performClick()
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()

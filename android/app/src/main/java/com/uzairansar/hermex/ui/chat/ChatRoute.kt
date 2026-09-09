@@ -3246,6 +3246,7 @@ private fun CustomModelEntry(
                         label = provider.name,
                         onClick = { onProviderIdChange(provider.id) },
                         filled = provider.id.equals(providerId.trim(), ignoreCase = true),
+                        modifier = Modifier.testTag("model_provider_choice_${provider.id}"),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }

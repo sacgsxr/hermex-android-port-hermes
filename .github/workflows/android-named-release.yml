@@ -106,7 +106,17 @@ jobs:
 
       - name: Test and build Android artifacts
         working-directory: android
-        run: ./gradlew testDebugUnitTest lintRelease pixel2api35DebugAndroidTest assembleRelease bundleRelease
+        run: ./gradlew testDebugUnitTest lintRelease assembleRelease bundleRelease
+
+      - name: Run API 35 connected-device tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest
 
       - name: Verify signed Android artifacts
         working-directory: android
@@ -242,7 +252,7 @@ jobs:
           - iOS/Android endpoint parity
           - Android localization catalog parity
           - Android unit tests
-          - Android API 35 managed-device tests
+          - Android API 35 connected-device tests
           - Android release lint
           - production-signed release APK and AAB builds
           EOF
