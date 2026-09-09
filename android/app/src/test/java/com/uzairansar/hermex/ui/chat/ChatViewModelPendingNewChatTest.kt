@@ -99,6 +99,25 @@ class ChatViewModelPendingNewChatTest {
     }
 
     @Test
+    fun noncePendingComposerRetryNeverLoadsTemporarySessionFromServer() = runTest {
+        val requests = CopyOnWriteArrayList<RecordedRequest>()
+        val server = pendingChatServer(requests, AtomicInteger())
+        try {
+            val viewModel = pendingViewModel(server, newPendingNewChatSessionId())
+            awaitComposer(viewModel)
+
+            viewModel.load()
+            delay(100)
+
+            assertFalse(requests.any { it.url.encodedPath == "/api/session" })
+            assertFalse(viewModel.state.value.isLoading)
+            assertNull(viewModel.state.value.error)
+        } finally {
+            closeTestServer(server)
+        }
+    }
+
+    @Test
     fun firstSendCreatesTheSelectedSessionBeforeStartingChatWithTheReturnedId() = runTest {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
         val server = pendingChatServer(requests, AtomicInteger())
@@ -343,7 +362,10 @@ class ChatViewModelPendingNewChatTest {
         server.close()
     }
 
-    private fun pendingViewModel(server: MockWebServer): ChatViewModel {
+    private fun pendingViewModel(
+        server: MockWebServer,
+        sessionId: String = PENDING_NEW_CHAT_SESSION_ID,
+    ): ChatViewModel {
         val client = HermesApiClient(server.url("/"), OkHttpClient())
         val repository = ChatRepository(
             client = client,
@@ -351,7 +373,7 @@ class ChatViewModelPendingNewChatTest {
             cacheOwnership = ServerCacheOwnership(),
             sse = SseStreamClient(server.url("/"), OkHttpClient()) { emptyList() },
         )
-        return ChatViewModel(PENDING_NEW_CHAT_SESSION_ID, repository).also(viewModels::add)
+        return ChatViewModel(sessionId, repository).also(viewModels::add)
     }
 
     private fun pendingChatServer(

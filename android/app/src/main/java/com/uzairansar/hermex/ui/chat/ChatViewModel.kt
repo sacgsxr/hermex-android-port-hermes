@@ -627,6 +627,11 @@ class ChatViewModel internal constructor(
     }
 
     fun load() {
+        if (isPendingNewChat) {
+            loadJob?.cancel()
+            _state.update { it.copy(isLoading = false, error = null) }
+            return
+        }
         val generation = ++loadGeneration
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
