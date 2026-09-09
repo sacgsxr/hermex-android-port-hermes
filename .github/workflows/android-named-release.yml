@@ -167,10 +167,19 @@ jobs:
           fi
 
           signer_output="$RUNNER_TEMP/hermex-apk-signer.txt"
-          "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output"
-          apk_digest="$(sed -n 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: //p' "$signer_output" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          if [ -z "$apk_digest" ]; then
-            echo "Could not read APK signer SHA-256 digest"
+          "$apksigner" verify --verbose --print-certs "$apk_path" > "$signer_output" 2>&1
+          apk_digest="$(python3 - "$signer_output" <<'PY'
+          import re
+          import sys
+
+          text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          match = re.search(r"certificate SHA-256 digest:\s*([0-9a-f:]+)", text, re.IGNORECASE)
+          if match:
+              print(match.group(1).replace(":", "").lower())
+          PY
+          )"
+          if [[ ! "$apk_digest" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Could not read a valid APK signer SHA-256 digest"
             exit 1
           fi
 
