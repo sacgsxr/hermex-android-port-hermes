@@ -3245,6 +3245,9 @@ private fun ModelPickerDialog(
                                     ModelOptionRow(
                                         model = model,
                                         location = ModelExecutionLocationResolver.resolve(model, providers),
+                                        modifier = Modifier.testTag(
+                                            "model_option_${model.normalizedProvider.orEmpty()}_${model.modelIdentifier.orEmpty()}",
+                                        ),
                                         selected = model.matchesSelection(selected),
                                         isFavorite = model.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
                                         allowsDelete = group.allowsDelete,
@@ -3393,6 +3396,7 @@ private fun ModelGroupHeader(
 private fun ModelOptionRow(
     model: ModelSummary,
     location: ModelExecutionLocation,
+    modifier: Modifier = Modifier,
     selected: Boolean,
     isFavorite: Boolean,
     allowsDelete: Boolean,
@@ -3401,7 +3405,7 @@ private fun ModelOptionRow(
     onDelete: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

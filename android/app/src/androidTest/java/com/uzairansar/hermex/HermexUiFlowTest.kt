@@ -1182,18 +1182,24 @@ class HermexUiFlowTest {
                 } == true
         }
         composeRule.onNodeWithTag("model_provider_openai").assertIsSelected()
-        // "GPT-5" also matches the chat header's current-model chip, so require
-        // at least two matches: the header chip plus the expanded picker row.
-        assertTrue(composeRule.onAllNodesWithText("GPT-5").fetchSemanticsNodes().size >= 2)
-        assertTrue(composeRule.onAllNodesWithText("Gemini 2.5").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithTag("model_option_openai_gpt-5").assertIsDisplayed()
+        assertTrue(
+            composeRule.onAllNodesWithTag("model_option_gemini_gemini-2.5")
+                .fetchSemanticsNodes()
+                .isEmpty(),
+        )
         composeRule.onNodeWithTag("model_provider_gemini").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             // The gemini group auto-expands, so its model row becomes visible.
-            composeRule.onAllNodesWithText("Gemini 2.5").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("model_option_gemini_gemini-2.5")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
         }
-        // GPT-5 is filtered out of the list; it remains only in the chat header's
-        // current-model chip.
-        assertTrue(composeRule.onAllNodesWithText("GPT-5").fetchSemanticsNodes().size == 1)
+        assertTrue(
+            composeRule.onAllNodesWithTag("model_option_openai_gpt-5")
+                .fetchSemanticsNodes()
+                .isEmpty(),
+        )
         // Tapping the active chip again returns to the unfiltered "All" view.
         composeRule.onNodeWithTag("model_provider_gemini").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
