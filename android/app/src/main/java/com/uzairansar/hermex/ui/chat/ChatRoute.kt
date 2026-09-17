@@ -3019,8 +3019,14 @@ private fun ModelPickerDialog(
     var customProviderId by rememberSaveable { mutableStateOf("") }
     var expandedGroupIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var collapsedSearchGroupIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    // Active provider chip (null = "All"). The snapshot lets All restore the
+    // expansion choices that were in effect before filtering.
+    var providerFilterId by rememberSaveable { mutableStateOf<String?>(null) }
+    var hasProviderExpansionSnapshot by rememberSaveable { mutableStateOf(false) }
+    var expansionBeforeProviderFilter by rememberSaveable { mutableStateOf(emptySet<String>()) }
     val query = searchText.trim()
     val providerChoices = remember(models, selected) { modelProviderChoices(models, selected) }
+    val providerFilterChoices = remember(models) { modelProviderChoices(models, null) }
     val customOption = remember(customModelId, customProviderId) {
         val modelId = customModelId.trim()
         val providerId = customProviderId.trim().lowercase(Locale.US)
@@ -3030,8 +3036,13 @@ private fun ModelPickerDialog(
             null
         }
     }
-    val modelGroups = remember(models, selected, favoriteKeys, recentKeys, query) {
+    val modelGroups = remember(models, selected, favoriteKeys, recentKeys, query, providerFilterId) {
+        val activeProvider = providerFilterId?.lowercase(Locale.US)
         val catalogGroups = modelCatalogGroups(models)
+            .filter { group ->
+                activeProvider == null ||
+                    group.providerId?.lowercase(Locale.US) == activeProvider
+            }
             .mapNotNull { group ->
                 val filteredModels = group.models.filter { model -> model.matchesModelQuery(query) }
                 if (filteredModels.isEmpty()) {
@@ -3040,17 +3051,44 @@ private fun ModelPickerDialog(
                     group.copy(models = filteredModels)
                 }
             }
-        customModelGroups(
-            catalogModels = models,
-            selected = selected,
-            favoriteKeys = favoriteKeys,
-            recentKeys = recentKeys,
-            query = query,
-        ) + catalogGroups
+        // Custom-model groups are provider-agnostic, so they only appear in the
+        // unfiltered ("All") view; a provider chip shows that provider's models.
+        if (activeProvider == null) {
+            customModelGroups(
+                catalogModels = models,
+                selected = selected,
+                favoriteKeys = favoriteKeys,
+                recentKeys = recentKeys,
+                query = query,
+            ) + catalogGroups
+        } else {
+            catalogGroups
+        }
     }
 
     LaunchedEffect(query) {
         collapsedSearchGroupIds = emptySet()
+    }
+    fun selectProviderFilter(providerId: String?) {
+        if (providerId == null) {
+            if (hasProviderExpansionSnapshot) {
+                expandedGroupIds = expansionBeforeProviderFilter
+            }
+            hasProviderExpansionSnapshot = false
+        } else {
+            if (providerFilterId == null) {
+                expansionBeforeProviderFilter = expandedGroupIds
+                hasProviderExpansionSnapshot = true
+            }
+            modelCatalogGroups(models)
+                .firstOrNull { it.providerId.equals(providerId, ignoreCase = true) }
+                ?.id
+                ?.let { groupId -> expandedGroupIds = expandedGroupIds + groupId }
+            // Keep the user's search text, but ensure a previous collapsed-search
+            // override cannot hide the newly selected provider's group.
+            collapsedSearchGroupIds = emptySet()
+        }
+        providerFilterId = providerId
     }
     LaunchedEffect(providerChoices, selected) {
         if (customProviderId.isBlank()) {
@@ -3074,6 +3112,40 @@ private fun ModelPickerDialog(
                 shape = HermexCardShape,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (providerFilterChoices.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("model_provider_filter_row")
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HermexPillButton(
+                        label = localizedString("All"),
+                        onClick = { selectProviderFilter(null) },
+                        filled = providerFilterId == null,
+                        selected = providerFilterId == null,
+                        modifier = Modifier.testTag("model_provider_filter_all"),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                    )
+                    providerFilterChoices.forEach { provider ->
+                        HermexPillButton(
+                            label = provider.name,
+                            onClick = {
+                                selectProviderFilter(
+                                    if (providerFilterId.equals(provider.id, ignoreCase = true)) null else provider.id,
+                                )
+                            },
+                            filled = providerFilterId.equals(provider.id, ignoreCase = true),
+                            selected = providerFilterId.equals(provider.id, ignoreCase = true),
+                            modifier = Modifier.testTag("model_provider_${provider.id}"),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             if (showsReasoning) {
                 Column(
                     modifier = Modifier
@@ -3111,19 +3183,21 @@ private fun ModelPickerDialog(
                     .fillMaxSize()
                     .testTag("model_picker_list"),
             ) {
-                item("custom-model-entry") {
-                    CustomModelEntry(
-                        modelId = customModelId,
-                        providerId = customProviderId,
-                        providerChoices = providerChoices,
-                        customOption = customOption,
-                        isFavorite = customOption?.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
-                        onModelIdChange = { customModelId = it },
-                        onProviderIdChange = { customProviderId = it },
-                        onUseCustom = { option -> onSelect(option) },
-                        onToggleFavorite = { option -> onToggleFavorite(option) },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (providerFilterId == null) {
+                    item("custom-model-entry") {
+                        CustomModelEntry(
+                            modelId = customModelId,
+                            providerId = customProviderId,
+                            providerChoices = providerChoices,
+                            customOption = customOption,
+                            isFavorite = customOption?.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
+                            onModelIdChange = { customModelId = it },
+                            onProviderIdChange = { customProviderId = it },
+                            onUseCustom = { option -> onSelect(option) },
+                            onToggleFavorite = { option -> onToggleFavorite(option) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
                 when {
                     models.isEmpty() && modelGroups.isEmpty() -> {
@@ -3173,6 +3247,9 @@ private fun ModelPickerDialog(
                                     ModelOptionRow(
                                         model = model,
                                         location = ModelExecutionLocationResolver.resolve(model, providers),
+                                        modifier = Modifier.testTag(
+                                            "model_option_${model.normalizedProvider.orEmpty()}_${model.modelIdentifier.orEmpty()}",
+                                        ),
                                         selected = model.matchesSelection(selected),
                                         isFavorite = model.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
                                         allowsDelete = group.allowsDelete,
@@ -3321,6 +3398,7 @@ private fun ModelGroupHeader(
 private fun ModelOptionRow(
     model: ModelSummary,
     location: ModelExecutionLocation,
+    modifier: Modifier = Modifier,
     selected: Boolean,
     isFavorite: Boolean,
     allowsDelete: Boolean,
@@ -3329,7 +3407,7 @@ private fun ModelOptionRow(
     onDelete: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

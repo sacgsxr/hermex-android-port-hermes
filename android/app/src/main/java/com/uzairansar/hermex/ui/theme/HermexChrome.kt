@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -298,6 +299,7 @@ fun HermexPillButton(
     outlinedContentColor: Color? = null,
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
     leading: (@Composable RowScope.() -> Unit)? = null,
+    selected: Boolean? = null,
 ) {
     val view = LocalView.current
     val hapticsEnabled = LocalHermexHapticsEnabled.current
@@ -308,12 +310,18 @@ fun HermexPillButton(
     val filledContainer = filledContainerColor ?: MaterialTheme.colorScheme.primary
     val filledContent = filledContentColor ?: MaterialTheme.colorScheme.onPrimary
     val outlinedContent = outlinedContentColor ?: MaterialTheme.colorScheme.onSurface
+    // Only controls that represent a choice should publish selection state.
+    val selectionModifier = if (selected != null) {
+        modifier.semantics { this.selected = selected }
+    } else {
+        modifier
+    }
 
     if (filled) {
         androidx.compose.material3.Button(
             onClick = hapticClick,
             enabled = enabled,
-            modifier = modifier.defaultMinSize(minHeight = 0.dp),
+            modifier = selectionModifier.defaultMinSize(minHeight = 0.dp),
             shape = HermexPillShape,
             colors = ButtonDefaults.buttonColors(
                 containerColor = filledContainer,
@@ -326,13 +334,13 @@ fun HermexPillButton(
         }
     } else {
         val outlinedModifier = if (outlinedContainerColor == null) {
-            modifier.hermexGlass(
+            selectionModifier.hermexGlass(
                 shape = HermexPillShape,
                 castsShadow = false,
                 surfaceLevel = HermexSurfaceLevel.Raised,
             )
         } else {
-            modifier
+            selectionModifier
                 .clip(HermexPillShape)
                 .background(outlinedContainerColor)
                 .hermexHairline(HermexPillShape)
