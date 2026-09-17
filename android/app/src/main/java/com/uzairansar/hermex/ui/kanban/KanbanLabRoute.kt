@@ -779,17 +779,26 @@ private fun KanbanConnectivityBanner(text: String, offline: Boolean, testTag: St
 @Composable
 private fun KanbanCompatibilityBanner(warnings: List<KanbanCompatibilityWarning>) {
     val unknown = warnings.filterIsInstance<KanbanCompatibilityWarning.UnsupportedStatus>().map { it.status }
+    val reason = kanbanCompatibilityReason(warnings)
     val readOnly = warnings.any {
         it == KanbanCompatibilityWarning.ReadOnly || it == KanbanCompatibilityWarning.WriteCapabilityUnavailable
     }
     Row(
-        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer).padding(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(10.dp)
+            .testTag("kanban_compatibility_notice"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             buildString {
                 if (readOnly) append(localizedString("Read-only"))
+                reason?.let {
+                    if (isNotEmpty()) append(" · ")
+                    append(localizedString(it))
+                }
                 if (unknown.isNotEmpty()) {
                     if (isNotEmpty()) append(" · ")
                     append(localizedString("Unknown Status"))

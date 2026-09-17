@@ -2601,7 +2601,7 @@ class HermexUiFlowTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
-        composeRule.onNodeWithTag("model_provider_choice_openai").performClick()
+        composeRule.onNodeWithTag("model_provider_openai").performClick()
         composeRule.onNodeWithText("Remote").assertIsDisplayed()
         composeRule.onNodeWithText("High").performClick()
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()

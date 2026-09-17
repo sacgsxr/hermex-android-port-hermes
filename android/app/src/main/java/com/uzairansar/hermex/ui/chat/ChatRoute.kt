@@ -175,6 +175,7 @@ import com.uzairansar.hermex.data.preferences.ModelFavoriteKey
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
 import com.uzairansar.hermex.data.repository.WorkspaceRepository
 import com.uzairansar.hermex.data.preferences.displayModelTitle
+import com.uzairansar.hermex.data.preferences.fallbackModel
 import com.uzairansar.hermex.data.preferences.favoriteKeyOrNull
 import com.uzairansar.hermex.data.preferences.matchesSelection
 import com.uzairansar.hermex.data.preferences.modelIdentifier
@@ -329,6 +330,17 @@ fun ChatRoute(
     val recentModelKeys by remember(localSettingsRepository) {
         localSettingsRepository?.recentModelKeys ?: flowOf(emptyList<ModelFavoriteKey>())
     }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val rememberedProfileName = state.selectedProfile?.name
+        ?: state.sessionProfile
+        ?: initialProfileName
+    val rememberedModelKey by remember(localSettingsRepository, serverId, rememberedProfileName) {
+        if (localSettingsRepository != null && serverId.isNotBlank() && !rememberedProfileName.isNullOrBlank()) {
+            localSettingsRepository.lastModelSelection(serverId, rememberedProfileName)
+        } else {
+            flowOf(null)
+        }
+    }.collectAsStateWithLifecycle(initialValue = null)
+    var modelMemoryProfile by remember(sessionId) { mutableStateOf<String?>(null) }
     val systemLayoutDirection = LocalLayoutDirection.current
     val chatLayoutDirection = if (chatDisplaySettings.rtlChatLayoutEnabled) {
         LayoutDirection.Rtl
@@ -362,6 +374,19 @@ fun ChatRoute(
         val openSessionId = state.openSessionId ?: return@LaunchedEffect
         onOpenChat(openSessionId)
         viewModel.consumeOpenSession()
+    }
+
+    LaunchedEffect(sessionId, rememberedProfileName, rememberedModelKey, state.modelOptions) {
+        if (!isPendingNewChatId(sessionId)) return@LaunchedEffect
+        val profileChanged = modelMemoryProfile != null && modelMemoryProfile != rememberedProfileName
+        if (profileChanged && rememberedModelKey == null) {
+            viewModel.clearRememberedModelForProfile()
+        }
+        modelMemoryProfile = rememberedProfileName
+        val rememberedKey = rememberedModelKey ?: return@LaunchedEffect
+        val rememberedModel = state.modelOptions.firstOrNull { it.favoriteKeyOrNull() == rememberedKey }
+            ?: rememberedKey.fallbackModel()
+        viewModel.applyRememberedModel(rememberedModel)
     }
 
     DisposableEffect(context) {
@@ -1343,6 +1368,7 @@ fun ChatRoute(
         ModelPickerDialog(
             models = state.modelOptions,
             selected = state.selectedModel,
+            isLoadingModels = state.isLoadingComposerConfig,
             providers = state.providerSummaries,
             reasoningEfforts = state.reasoningOptions,
             selectedReasoning = state.selectedReasoning,
@@ -1355,6 +1381,9 @@ fun ChatRoute(
                 viewModel.selectModel(model)
                 modelPickerScope.launch {
                     localSettingsRepository?.recordRecentModel(model)
+                    rememberedProfileName?.let { profileName ->
+                        localSettingsRepository?.recordLastModelSelection(serverId, profileName, model)
+                    }
                 }
             },
             onToggleFavorite = { model ->
@@ -2370,8 +2399,8 @@ private fun ComposerSurface(
                 model = state.selectedModel,
                 location = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries),
                 onClick = onOpenModelPicker,
-                enabled = (state.selectedModel != null || state.modelOptions.isNotEmpty()) &&
-                    !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
+                isLoading = state.isLoadingComposerConfig && state.selectedModel == null && state.modelOptions.isEmpty(),
             )
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
@@ -2538,8 +2567,13 @@ private fun ComposerModelSelector(
     location: ModelExecutionLocation,
     onClick: () -> Unit,
     enabled: Boolean,
+    isLoading: Boolean = false,
 ) {
-    val title = model?.displayModelTitle?.takeIf { it.isNotBlank() } ?: localizedString("Choose Model")
+    val title = when {
+        model?.displayModelTitle?.isNotBlank() == true -> model.displayModelTitle
+        isLoading -> localizedString("Loading models...")
+        else -> localizedString("Choose Model")
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3002,6 +3036,7 @@ private fun AttachmentOptionsSheet(
 private fun ModelPickerDialog(
     models: List<ModelSummary>,
     selected: ModelSummary?,
+    isLoadingModels: Boolean,
     providers: List<ProviderSummary>,
     reasoningEfforts: List<String>,
     selectedReasoning: String?,
@@ -3188,7 +3223,6 @@ private fun ModelPickerDialog(
                         CustomModelEntry(
                             modelId = customModelId,
                             providerId = customProviderId,
-                            providerChoices = providerChoices,
                             customOption = customOption,
                             isFavorite = customOption?.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
                             onModelIdChange = { customModelId = it },
@@ -3202,7 +3236,7 @@ private fun ModelPickerDialog(
                 when {
                     models.isEmpty() && modelGroups.isEmpty() -> {
                         item("empty-models") {
-                            EmptyPickerMessage("No models available.")
+                            EmptyPickerMessage(if (isLoadingModels) "Loading models..." else "No models available.")
                         }
                     }
                     modelGroups.isEmpty() -> {
@@ -3275,7 +3309,6 @@ private fun ModelPickerDialog(
 private fun CustomModelEntry(
     modelId: String,
     providerId: String,
-    providerChoices: List<ModelProviderChoice>,
     customOption: ModelSummary?,
     isFavorite: Boolean,
     onModelIdChange: (String) -> Unit,
@@ -3311,24 +3344,6 @@ private fun CustomModelEntry(
             singleLine = true,
             shape = HermexCardShape,
         )
-        if (providerChoices.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                providerChoices.forEach { provider ->
-                    HermexPillButton(
-                        label = provider.name,
-                        onClick = { onProviderIdChange(provider.id) },
-                        filled = provider.id.equals(providerId.trim(), ignoreCase = true),
-                        modifier = Modifier.testTag("model_provider_choice_${provider.id}"),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,

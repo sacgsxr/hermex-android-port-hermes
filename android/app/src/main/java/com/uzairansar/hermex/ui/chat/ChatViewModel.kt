@@ -861,7 +861,7 @@ class ChatViewModel internal constructor(
                         selectedModel = when {
                             it.pendingExplicitModelPick -> selectedCatalogModel ?: it.selectedModel ?: sessionModelSelection
                             pendingModelSelectionLocked && it.selectedModel == null -> null
-                            isPendingNewChat -> null
+                            isPendingNewChat -> it.selectedModel
                             sessionModelSelection != null -> sessionModelSelection
                             selectedCatalogModel != null -> selectedCatalogModel
                             it.sessionModel != null -> ModelSummary(
@@ -991,6 +991,35 @@ class ChatViewModel internal constructor(
 
     fun selectProfile(profile: ProfileSummary) {
         requestProfileSwitch(profile)
+    }
+
+    /** Applies a server/profile-scoped remembered choice without treating it as a new explicit edit. */
+    fun applyRememberedModel(model: ModelSummary) {
+        if (!isPendingNewChat || pendingComposerAbandoned) return
+        val current = _state.value
+        if (current.isRunningSessionAction || current.isStreaming) return
+        if (current.selectedModel?.matchesModelIdentity(model.modelIdentity, model.provider) == true) return
+        _state.update {
+            it.copy(
+                selectedModel = model,
+                pendingExplicitModelPick = false,
+                error = null,
+                notice = null,
+            )
+        }
+        viewModelScope.launch { refreshReasoningForModel(model, reportError = false) }
+    }
+
+    fun clearRememberedModelForProfile() {
+        if (!isPendingNewChat || pendingComposerAbandoned) return
+        _state.update {
+            it.copy(
+                selectedModel = null,
+                pendingExplicitModelPick = false,
+                error = null,
+                notice = null,
+            )
+        }
     }
 
     fun dismissPendingProfileSwitch() {

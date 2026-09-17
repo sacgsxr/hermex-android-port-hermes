@@ -99,6 +99,27 @@ class ChatViewModelPendingNewChatTest {
     }
 
     @Test
+    fun rememberedPendingModelIsImmediatelySelectableWithoutCreatingASession() = runTest {
+        val requests = CopyOnWriteArrayList<RecordedRequest>()
+        val server = pendingChatServer(requests, AtomicInteger())
+        try {
+            val viewModel = pendingViewModel(server)
+            awaitComposer(viewModel)
+
+            viewModel.applyRememberedModel(ModelSummary(id = "gpt-5", label = "GPT-5", provider = "openai"))
+
+            val state = withTimeout(5_000) {
+                viewModel.state.first { it.selectedModel?.id == "gpt-5" }
+            }
+            assertEquals("gpt-5", state.selectedModel?.id)
+            assertFalse(state.pendingExplicitModelPick)
+            assertFalse(requests.any { it.url.encodedPath == "/api/session/new" })
+        } finally {
+            closeTestServer(server)
+        }
+    }
+
+    @Test
     fun noncePendingComposerRetryNeverLoadsTemporarySessionFromServer() = runTest {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
         val server = pendingChatServer(requests, AtomicInteger())
