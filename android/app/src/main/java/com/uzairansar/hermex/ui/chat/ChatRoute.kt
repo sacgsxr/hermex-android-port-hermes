@@ -3183,19 +3183,21 @@ private fun ModelPickerDialog(
                     .fillMaxSize()
                     .testTag("model_picker_list"),
             ) {
-                item("custom-model-entry") {
-                    CustomModelEntry(
-                        modelId = customModelId,
-                        providerId = customProviderId,
-                        providerChoices = providerChoices,
-                        customOption = customOption,
-                        isFavorite = customOption?.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
-                        onModelIdChange = { customModelId = it },
-                        onProviderIdChange = { customProviderId = it },
-                        onUseCustom = { option -> onSelect(option) },
-                        onToggleFavorite = { option -> onToggleFavorite(option) },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (providerFilterId == null) {
+                    item("custom-model-entry") {
+                        CustomModelEntry(
+                            modelId = customModelId,
+                            providerId = customProviderId,
+                            providerChoices = providerChoices,
+                            customOption = customOption,
+                            isFavorite = customOption?.favoriteKeyOrNull()?.let { it in favoriteKeys } == true,
+                            onModelIdChange = { customModelId = it },
+                            onProviderIdChange = { customProviderId = it },
+                            onUseCustom = { option -> onSelect(option) },
+                            onToggleFavorite = { option -> onToggleFavorite(option) },
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
                 when {
                     models.isEmpty() && modelGroups.isEmpty() -> {
