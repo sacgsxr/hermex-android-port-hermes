@@ -40,6 +40,7 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.uzairansar.hermex.core.network.HermesApiClient
@@ -945,7 +946,7 @@ class HermexUiFlowTest {
                             },
                         )
                         "/api/models" -> json(
-                            """{"models":[{"id":"gpt-5","label":"GPT-5","provider":"openai"},{"id":"gpt-4o","label":"GPT-4o","provider":"openai"}]}""",
+                            """{"models":[{"id":"gpt-5","label":"GPT-5","provider":"openai"},{"id":"gpt-4o","label":"GPT-4o","provider":"openai"},{"id":"gemini-2.5","label":"Gemini 2.5","provider":"gemini"}]}""",
                         )
                         "/api/profiles" -> json("""{"profiles":[{"name":"default","display_name":"Default"},{"name":"review","display_name":"Review"}]}""")
                         "/api/workspaces" -> json(
@@ -1167,6 +1168,44 @@ class HermexUiFlowTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Mobile") }
         composeRule.onNodeWithText("GPT-5").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
+        // Provider chips filter the catalog and auto-expand the selected group.
+        composeRule.onNodeWithTag("model_provider_filter_row").assertIsDisplayed()
+        val openaiChip = composeRule.onNodeWithTag("model_provider_openai")
+        openaiChip.performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithTag("model_provider_openai")
+                .fetchSemanticsNodes()
+                .singleOrNull()
+                ?.config
+                ?.let { config ->
+                    if (config.contains(SemanticsProperties.Selected)) config[SemanticsProperties.Selected] else false
+                } == true
+        }
+        composeRule.onNodeWithTag("model_provider_openai").assertIsSelected()
+        // "GPT-5" also matches the chat header's current-model chip, so require
+        // at least two matches: the header chip plus the expanded picker row.
+        assertTrue(composeRule.onAllNodesWithText("GPT-5").fetchSemanticsNodes().size >= 2)
+        assertTrue(composeRule.onAllNodesWithText("Gemini 2.5").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithTag("model_provider_gemini").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            // The gemini group auto-expands, so its model row becomes visible.
+            composeRule.onAllNodesWithText("Gemini 2.5").fetchSemanticsNodes().isNotEmpty()
+        }
+        // GPT-5 is filtered out of the list; it remains only in the chat header's
+        // current-model chip.
+        assertTrue(composeRule.onAllNodesWithText("GPT-5").fetchSemanticsNodes().size == 1)
+        // Tapping the active chip again returns to the unfiltered "All" view.
+        composeRule.onNodeWithTag("model_provider_gemini").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithTag("model_provider_filter_all")
+                .fetchSemanticsNodes()
+                .singleOrNull()
+                ?.config
+                ?.let { config ->
+                    if (config.contains(SemanticsProperties.Selected)) config[SemanticsProperties.Selected] else false
+                } == true
+        }
+        composeRule.onNodeWithTag("model_provider_filter_all").assertIsSelected()
         val pickerBeforeScroll = composeRule
             .onNodeWithTag("picker_sheet", useUnmergedTree = true)
             .fetchSemanticsNode()
