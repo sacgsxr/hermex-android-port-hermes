@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.Locale
 
@@ -62,6 +63,13 @@ internal fun normalizeTranscriptTextScale(scale: Float): Float =
         MIN_TRANSCRIPT_TEXT_SCALE,
         MAX_TRANSCRIPT_TEXT_SCALE,
     )
+
+@Serializable
+internal data class LastModelSelection(
+    val serverId: String,
+    val profileName: String,
+    val model: ModelFavoriteKey,
+)
 
 data class SessionRowDisplaySettings(
     val showMessageCount: Boolean = true,
@@ -175,6 +183,13 @@ class LocalSettingsRepository(context: Context) {
     val recentModelKeys: Flow<List<ModelFavoriteKey>> = dataStore.data.map { preferences ->
         decodeModelKeys(preferences[RECENT_MODEL_KEYS]).limitedDeduplicatedModelKeys()
     }
+
+    fun lastModelSelection(serverId: String, profileName: String): Flow<ModelFavoriteKey?> =
+        dataStore.data.map { preferences ->
+            decodeLastModelSelections(preferences[LAST_MODEL_SELECTIONS])
+                .lastOrNull { it.matches(serverId, profileName) }
+                ?.model
+        }
 
     suspend fun setThemeMode(mode: AppThemeMode) {
         dataStore.edit { preferences ->
@@ -445,6 +460,20 @@ class LocalSettingsRepository(context: Context) {
         }
     }
 
+    suspend fun recordLastModelSelection(serverId: String, profileName: String, model: ModelSummary) {
+        val normalizedServerId = serverId.trim()
+        val normalizedProfileName = profileName.trim()
+        val key = model.favoriteKeyOrNull() ?: return
+        if (normalizedServerId.isEmpty() || normalizedProfileName.isEmpty()) return
+        dataStore.edit { preferences ->
+            val selections = decodeLastModelSelections(preferences[LAST_MODEL_SELECTIONS])
+                .filterNot { it.matches(normalizedServerId, normalizedProfileName) }
+            preferences[LAST_MODEL_SELECTIONS] = encodeLastModelSelections(
+                selections + LastModelSelection(normalizedServerId, normalizedProfileName, key),
+            )
+        }
+    }
+
     private suspend fun setBoolean(key: androidx.datastore.preferences.core.Preferences.Key<Boolean>, enabled: Boolean) {
         dataStore.edit { preferences -> preferences[key] = enabled }
     }
@@ -487,6 +516,7 @@ class LocalSettingsRepository(context: Context) {
         val RESPONSE_COMPLETION_NOTIFICATION_PERMISSION_REQUESTED = booleanPreferencesKey("responseCompletionNotifications.hasRequestedPermission")
         val FAVORITE_MODEL_KEYS = stringPreferencesKey("chatComposer.favoriteModels")
         val RECENT_MODEL_KEYS = stringPreferencesKey("chatComposer.recentModels")
+        val LAST_MODEL_SELECTIONS = stringPreferencesKey("chatComposer.lastModelSelections")
 
         fun showCliSessionsKey(serverId: String) = booleanPreferencesKey("show_cli_sessions::$serverId")
 
@@ -500,5 +530,17 @@ class LocalSettingsRepository(context: Context) {
 
         fun encodeModelKeys(keys: List<ModelFavoriteKey>): String =
             MODEL_KEY_JSON.encodeToString(keys)
+
+        fun decodeLastModelSelections(value: String?): List<LastModelSelection> =
+            value
+                ?.takeIf { it.isNotBlank() }
+                ?.let { raw -> runCatching { MODEL_KEY_JSON.decodeFromString<List<LastModelSelection>>(raw) }.getOrNull() }
+                .orEmpty()
+
+        fun encodeLastModelSelections(selections: List<LastModelSelection>): String =
+            MODEL_KEY_JSON.encodeToString(selections)
     }
 }
+
+internal fun LastModelSelection.matches(serverId: String, profileName: String): Boolean =
+    this.serverId == serverId.trim() && this.profileName.equals(profileName.trim(), ignoreCase = true)

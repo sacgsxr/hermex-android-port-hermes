@@ -113,7 +113,9 @@ internal class KanbanDispatcherController(
             } catch (error: Throwable) {
                 if (!isCurrent(mode, board, currentGeneration, id)) return@launch
                 if (error is ApiError.Network) onOffline()
-                if (error is ApiError.Http && error.statusCode in setOf(404, 405)) capabilityIncompatible = true
+                if (isMissingKanbanCapability(error) || (error is ApiError.Http && error.statusCode in setOf(404, 405))) {
+                    capabilityIncompatible = true
+                }
                 val completed = System.currentTimeMillis()
                 if (isDefinitiveDispatchFailure(error)) {
                     mutableState.value = KanbanDispatchState(mode, board, KanbanDispatchPhase.Refused, completedAtMillis = completed, boardActivityGeneration = boardActivityGeneration())
@@ -161,5 +163,5 @@ internal class KanbanDispatcherController(
 private fun isDefinitiveDispatchFailure(error: Throwable): Boolean = when (error) {
     ApiError.Unauthorized, is ApiError.InsecureTransport -> true
     is ApiError.Http -> error.statusCode in 400..499 && error.statusCode != 408
-    else -> false
+    else -> isMissingKanbanCapability(error)
 }

@@ -69,4 +69,19 @@ class ModelPickerMemoryTest {
         assertTrue(catalogModel.matchesSelection(ModelSummary(id = "gpt-4.1", provider = "openai")))
         assertFalse(catalogModel.matchesSelection(ModelSummary(id = "gpt-4.1", provider = "azure")))
     }
+
+    @Test
+    fun lastModelSelectionRequiresTheSameServerAndProfile() {
+        val remembered = listOf(
+            LastModelSelection("server-a", "Writing", ModelFavoriteKey("model-a", "provider-a")),
+            LastModelSelection("server-b", "Writing", ModelFavoriteKey("model-b", "provider-b")),
+            LastModelSelection("server-a", "Coding", ModelFavoriteKey("model-c", "provider-c")),
+        )
+
+        assertEquals(
+            ModelFavoriteKey("model-a", "provider-a"),
+            remembered.lastOrNull { it.matches("server-a", "writing") }?.model,
+        )
+        assertEquals(null, remembered.lastOrNull { it.matches("server-c", "Writing") })
+    }
 }
