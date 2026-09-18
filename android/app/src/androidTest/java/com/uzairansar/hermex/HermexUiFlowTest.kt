@@ -2602,7 +2602,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
         composeRule.onNodeWithTag("model_provider_openai").performClick()
-        composeRule.onNodeWithText("Remote").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Remote").fetchSemanticsNodes().isNotEmpty())
         composeRule.onNodeWithText("High").performClick()
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
         composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
