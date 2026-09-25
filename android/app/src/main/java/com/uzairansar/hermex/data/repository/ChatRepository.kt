@@ -151,18 +151,25 @@ class ChatRepository(
         workspace: String? = null,
     ): String? {
         val operationGeneration = cacheOwnership.generation(serverUrl)
-        val streamId = client.chatStart(
-            ChatStartRequest(
-                sessionId = sessionId,
-                message = message,
-                workspace = workspace,
-                model = model?.id ?: model?.name,
-                modelProvider = model?.provider,
-                profile = profile?.name ?: profile?.displayName ?: profileName,
-                explicitModelPick = explicitModelPick,
-                attachments = attachments.ifEmpty { null },
-            ),
-        ).streamId
+        val request = ChatStartRequest(
+            sessionId = sessionId,
+            message = message,
+            workspace = workspace,
+            model = model?.id ?: model?.name,
+            modelProvider = model?.provider,
+            profile = profile?.name ?: profile?.displayName ?: profileName,
+            explicitModelPick = explicitModelPick,
+            attachments = attachments.ifEmpty { null },
+        )
+        val streamId = try {
+            client.chatStart(request).streamId
+        } catch (error: ApiError.Http) {
+            val requestProfile = request.profile?.trim()?.takeIf { it.isNotBlank() }
+            if (error.statusCode != 404 || requestProfile == null) throw error
+            val response = client.switchProfile(requestProfile)
+            require(response.error.isNullOrBlank()) { response.error ?: "Could not switch profile." }
+            client.chatStart(request).streamId
+        }
         streamId?.let { streamCacheGenerations[it] = operationGeneration }
         return streamId
     }

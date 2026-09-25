@@ -324,6 +324,35 @@ class ChatViewModelPendingNewChatTest {
         }
     }
 
+    @Test
+    fun profileScopedChatStartNotFoundSwitchesProfileAndRetriesOnce() = runTest {
+        val requests = CopyOnWriteArrayList<RecordedRequest>()
+        val chatStarts = AtomicInteger()
+        val server = pendingChatServer(
+            requests,
+            AtomicInteger(),
+            chatStarts = chatStarts,
+            failFirstChatStart = true,
+            failFirstChatStartStatus = 404,
+        )
+        try {
+            val viewModel = pendingViewModel(server)
+            awaitComposer(viewModel)
+            viewModel.selectProfile(ProfileSummary(name = "work", displayName = "Work", provider = "openai"))
+            viewModel.updateDraft("profile retry")
+            viewModel.send()
+
+            awaitRequestCount(requests, "/api/chat/start", 2)
+            awaitResponseCompletion(viewModel)
+            assertEquals(1, requests.count { it.url.encodedPath == "/api/session/new" })
+            assertEquals(2, requests.count { it.url.encodedPath == "/api/profile/switch" })
+            assertEquals(2, chatStarts.get())
+            assertTrue(requests.filter { it.url.encodedPath == "/api/chat/start" }.all { it.body?.utf8().orEmpty().contains("created-1") })
+        } finally {
+            closeTestServer(server)
+        }
+    }
+
     private suspend fun awaitRequestCount(
         requests: CopyOnWriteArrayList<RecordedRequest>,
         path: String,
@@ -405,6 +434,7 @@ class ChatViewModelPendingNewChatTest {
         modelsCalls: AtomicInteger,
         chatStarts: AtomicInteger = AtomicInteger(),
         failFirstChatStart: Boolean = false,
+        failFirstChatStartStatus: Int = 500,
         chatStartDelayMillis: Long = 0,
     ): MockWebServer = MockWebServer().apply {
         dispatcher = object : Dispatcher() {
@@ -442,7 +472,7 @@ class ChatViewModelPendingNewChatTest {
                     "/api/chat/start" -> {
                         val attempt = chatStarts.incrementAndGet()
                         val response = if (failFirstChatStart && attempt == 1) {
-                            MockResponse.Builder().code(500).body("{\"error\":\"temporary\"}")
+                            MockResponse.Builder().code(failFirstChatStartStatus).body("{\"error\":\"temporary\"}")
                         } else {
                             MockResponse.Builder().code(200).body("{\"stream_id\":\"stream-$attempt\",\"session_id\":\"created-1\"}")
                         }
