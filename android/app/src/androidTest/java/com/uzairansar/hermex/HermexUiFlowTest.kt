@@ -1252,6 +1252,9 @@ class HermexUiFlowTest {
         composeRule.onNodeWithTag("model_picker_list").performScrollToNode(hasSemanticsText("GPT-4o"))
         composeRule.onNodeWithText("GPT-4o").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("GPT-4o") }
+        // Profile now lives in the collapsed params sheet, not a strip pill.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Default") }
         composeRule.onNodeWithText("Default").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Review") }
         composeRule.onNodeWithText("Review").performClick()
