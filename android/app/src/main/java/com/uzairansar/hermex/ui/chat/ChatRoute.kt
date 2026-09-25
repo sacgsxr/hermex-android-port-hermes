@@ -1213,7 +1213,7 @@ fun ChatRoute(
                             voiceDictationError = voiceDictationError,
                             streamingSendBehavior = streamingSendBehavior,
                             primaryActionTintColor = primaryActionTintColor,
-                            showSecondaryBar = !isReadingOlderTranscript,
+                            showCompactControls = !isReadingOlderTranscript,
                             onDraftChange = viewModel::updateDraft,
                             onSend = {
                                 followsTranscriptBottom = true
@@ -2315,7 +2315,7 @@ private fun ComposerSurface(
     voiceDictationError: String?,
     streamingSendBehavior: StreamingSendBehavior,
     primaryActionTintColor: Color?,
-    showSecondaryBar: Boolean,
+    showCompactControls: Boolean,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onStreamingSend: () -> Unit,
@@ -2387,6 +2387,14 @@ private fun ComposerSurface(
                 onSelect = { suggestion -> onDraftChange(suggestion.replacement) },
             )
         }
+        if (showCompactControls) {
+            ComposerCompactControlsRow(
+                state = state,
+                onOpenModelPicker = onOpenModelPicker,
+                onOpenProfilePicker = onOpenProfilePicker,
+                onOpenWorkspacePicker = onOpenWorkspacePicker,
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2395,17 +2403,6 @@ private fun ComposerSurface(
                     surfaceLevel = HermexSurfaceLevel.Floating,
                 ),
         ) {
-            ComposerModelSelector(
-                model = state.selectedModel,
-                location = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries),
-                onClick = onOpenModelPicker,
-                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                isLoading = state.isLoadingComposerConfig && state.selectedModel == null && state.modelOptions.isEmpty(),
-            )
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
             if (state.pendingAttachments.isNotEmpty()) {
                 ComposerAttachmentStrip(
                     attachments = state.pendingAttachments,
@@ -2522,13 +2519,6 @@ private fun ComposerSurface(
                 }
             }
         }
-        if (showSecondaryBar) {
-            ComposerSecondaryBar(
-                state = state,
-                onOpenWorkspacePicker = onOpenWorkspacePicker,
-                onOpenProfilePicker = onOpenProfilePicker,
-            )
-        }
     }
     previewAttachment?.let { attachment ->
         AttachmentPreviewSheet(
@@ -2537,6 +2527,97 @@ private fun ComposerSurface(
             loadAttachmentFile = loadAttachmentFile,
             onDismiss = { previewAttachment = null },
         )
+    }
+}
+
+@Composable
+private fun ComposerCompactControlsRow(
+    state: ChatUiState,
+    onOpenModelPicker: () -> Unit,
+    onOpenProfilePicker: () -> Unit,
+    onOpenWorkspacePicker: () -> Unit,
+) {
+    val contextSnapshot = state.contextWindowSnapshot
+    val showsProfile = state.showsProfileControl
+    val showsWorkspace = state.hasWorkspaceChoices
+    val showsModel = state.selectedModel != null || state.isLoadingComposerConfig || state.modelOptions.isNotEmpty()
+    if (!showsModel && !showsProfile && !showsWorkspace && contextSnapshot?.percentage == null) return
+    val controlsEnabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction
+    val modelTitle = state.selectedModel?.displayModelTitle
+        ?: if (state.isLoadingComposerConfig && state.modelOptions.isEmpty()) {
+            localizedString("Loading models...")
+        } else {
+            localizedString("Choose Model")
+        }
+    val modelLocation = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 2.dp, end = 2.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showsModel) {
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .height(34.dp)
+                    .clip(HermexPillShape)
+                    .hermexGlass(shape = HermexPillShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
+                    .clickable(enabled = controlsEnabled, onClick = onOpenModelPicker)
+                    .testTag("chat_model_selector")
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Model: $modelTitle, ${modelLocation.label}"
+                    }
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(
+                        modelTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                ModelExecutionBadge(modelLocation)
+                Text(
+                    "⌄",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+        }
+        if (showsProfile) {
+            HermexSelectorPill(
+                label = state.profileTitle,
+                onClick = onOpenProfilePicker,
+                modifier = Modifier.testTag("chat_profile_selector"),
+                enabled = controlsEnabled,
+                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
+                maxWidth = 150.dp,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        if (showsWorkspace) {
+            HermexSelectorPill(
+                label = state.workspaceTitle,
+                onClick = onOpenWorkspacePicker,
+                enabled = controlsEnabled,
+                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_folder,
+                maxWidth = 150.dp,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                modifier = Modifier.testTag("chat_workspace_picker"),
+            )
+        }
+        contextSnapshot?.let { snapshot ->
+            if (snapshot.percentage != null) {
+                ContextWindowIndicator(snapshot = snapshot)
+            }
+        }
     }
 }
 
@@ -2559,55 +2640,6 @@ private fun ComposerInlineIconButton(
             MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.82f else 0.34f),
         ),
     )
-}
-
-@Composable
-private fun ComposerModelSelector(
-    model: ModelSummary?,
-    location: ModelExecutionLocation,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    isLoading: Boolean = false,
-) {
-    val title = when {
-        model?.displayModelTitle?.isNotBlank() == true -> model.displayModelTitle
-        isLoading -> localizedString("Loading models...")
-        else -> localizedString("Choose Model")
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics(mergeDescendants = true) {
-                contentDescription = "Model: $title, ${location.label}"
-            }
-            .testTag("chat_model_selector")
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                localizedString("Model"),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-            )
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        ModelExecutionBadge(location)
-        Text(
-            "⌄",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.secondary,
-        )
-    }
 }
 
 @Composable
@@ -2721,51 +2753,6 @@ internal fun voiceDictationDraft(baseDraft: String, transcript: String): String 
     if (baseDraft.isBlank()) return spoken
     val separator = if (baseDraft.last().isWhitespace()) "" else " "
     return "$baseDraft$separator$spoken"
-}
-
-@Composable
-private fun ComposerSecondaryBar(
-    state: ChatUiState,
-    onOpenWorkspacePicker: () -> Unit,
-    onOpenProfilePicker: () -> Unit,
-) {
-    val showsWorkspace = state.hasWorkspaceChoices
-    val showsProfile = state.showsProfileControl
-    val contextSnapshot = state.contextWindowSnapshot
-    if (!showsWorkspace && !showsProfile && contextSnapshot?.percentage == null) return
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(bottom = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (showsProfile) {
-            HermexSelectorPill(
-                label = state.profileTitle,
-                onClick = onOpenProfilePicker,
-                modifier = Modifier.testTag("chat_profile_selector"),
-                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            )
-        }
-        if (showsWorkspace) {
-            HermexSelectorPill(
-                label = state.workspaceTitle,
-                onClick = onOpenWorkspacePicker,
-                enabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_folder,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                modifier = Modifier.testTag("chat_workspace_picker"),
-            )
-        }
-        contextSnapshot?.let {
-            ContextWindowIndicator(snapshot = it)
-        }
-    }
 }
 
 @Composable
