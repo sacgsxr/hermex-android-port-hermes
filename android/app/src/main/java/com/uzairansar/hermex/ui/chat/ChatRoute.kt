@@ -2568,14 +2568,18 @@ private fun ComposerCompactControlsRow(
     ) {
         if (state.isStreaming) {
             // Live status occupies the left slot; the gauge and params button
-            // stay pinned so nothing shifts horizontally mid-answer.
+            // stay pinned so nothing shifts horizontally mid-answer. Reuse the
+            // app's own phase resolver so the label tracks the real turn state
+            // (thinking -> responding -> running tool) instead of a fixed word.
+            val turnIndicator = state.activeTurnIndicator()
             StreamingStatusLabel(
+                label = turnIndicator?.label ?: localizedString("Thinking"),
                 // weight() is a RowScope extension, so it must be applied by
                 // the caller and passed in rather than used inside this
                 // composable, which has no RowScope receiver.
                 modifier = Modifier
                     .weight(1f, fill = false)
-                    .widthIn(max = 208.dp),
+                    .widthIn(max = 168.dp),
             )
         } else if (showsModel) {
             Row(
@@ -2591,7 +2595,7 @@ private fun ComposerCompactControlsRow(
                     }
                     // Cap the pill so a long model name can never crowd the
                     // context gauge or the params button off a narrow screen.
-                    .widthIn(max = 208.dp)
+                    .widthIn(max = 168.dp)
                     .padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2668,14 +2672,16 @@ private fun ComposerCompactControlsRow(
 }
 
 @Composable
-private fun StreamingStatusLabel(modifier: Modifier = Modifier) {
-    val statusLabel = localizedString("Thinking")
+private fun StreamingStatusLabel(
+    label: String,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier
             .testTag("chat_streaming_status")
             // Long localized status text must ellipsize rather than push the
             // gauge and params button off a narrow screen.
-            .semantics { contentDescription = statusLabel },
+            .semantics { contentDescription = label },
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -2685,7 +2691,7 @@ private fun StreamingStatusLabel(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            text = statusLabel,
+            text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
