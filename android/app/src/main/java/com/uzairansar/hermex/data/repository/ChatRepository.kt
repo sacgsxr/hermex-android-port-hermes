@@ -308,14 +308,22 @@ class ChatRepository(
         workspace: String?,
         model: ModelSummary?,
         profile: ProfileSummary?,
-    ): SessionSummary? = client.newSession(
-        NewSessionRequest(
-            workspace = workspace?.trim()?.takeIf { it.isNotBlank() },
-            model = model?.id ?: model?.name,
-            modelProvider = model?.provider,
-            profile = profile?.name ?: profile?.displayName,
-        ),
-    ).session
+    ): SessionSummary? {
+        val profileName = profile?.name?.trim()?.takeIf { it.isNotBlank() }
+            ?: profile?.displayName?.trim()?.takeIf { it.isNotBlank() }
+        if (profileName != null) {
+            val response = client.switchProfile(profileName)
+            require(response.error.isNullOrBlank()) { response.error ?: "Could not switch profile." }
+        }
+        return client.newSession(
+            NewSessionRequest(
+                workspace = workspace?.trim()?.takeIf { it.isNotBlank() },
+                model = model?.id ?: model?.name,
+                modelProvider = model?.provider,
+                profile = profileName,
+            ),
+        ).session
+    }
 
     suspend fun approvalPending(sessionId: String): ApprovalPendingResponse = client.approvalPending(sessionId)
     suspend fun respondApproval(sessionId: String, choice: ApprovalChoice, approvalId: String?): ApprovalRespondResponse =

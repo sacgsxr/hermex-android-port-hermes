@@ -151,11 +151,15 @@ class ChatViewModelPendingNewChatTest {
             viewModel.send()
 
             awaitRequestCount(requests, "/api/chat/start", 1)
+            val switchRequest = requests.first { it.url.encodedPath == "/api/profile/switch" }
             val sessionRequest = requests.first { it.url.encodedPath == "/api/session/new" }
             val chatRequest = requests.first { it.url.encodedPath == "/api/chat/start" }
+            val switchIndex = requests.indexOf(switchRequest)
             val sessionIndex = requests.indexOf(sessionRequest)
             val chatIndex = requests.indexOf(chatRequest)
+            assertTrue(switchIndex < sessionIndex)
             assertTrue(sessionIndex < chatIndex)
+            assertEquals("""{"name":"work"}""", switchRequest.body?.utf8())
             assertEquals(
                 """{"workspace":"/workspace","model":"gpt-5","model_provider":"openai","profile":"work"}""",
                 sessionRequest.body?.utf8(),
@@ -166,7 +170,6 @@ class ChatViewModelPendingNewChatTest {
             )
             awaitResponseCompletion(viewModel)
             assertEquals("stream-1", requests.first { it.url.encodedPath == "/api/chat/stream" }.url.queryParameter("stream_id"))
-            assertFalse(requests.any { it.url.encodedPath == "/api/profile/switch" })
         } finally {
             closeTestServer(server)
         }
@@ -422,6 +425,9 @@ class ChatViewModelPendingNewChatTest {
                     "/api/providers" -> json("""{"providers":[]}""")
                     "/api/profiles" -> json(
                         """{"active":"default","single_profile_mode":false,"profiles":[{"name":"default","display_name":"Default"},{"name":"work","display_name":"Work"}]}""",
+                    )
+                    "/api/profile/switch" -> json(
+                        """{"active":"work","profiles":[{"name":"default","display_name":"Default"},{"name":"work","display_name":"Work"}],"default_model":"gpt-5","default_workspace":"/workspace"}""",
                     )
                     "/api/workspaces" -> json("""{"last":"/workspace","workspaces":[{"path":"/workspace","name":"workspace"}]}""")
                     "/api/skills" -> json("""{"skills":[]}""")
