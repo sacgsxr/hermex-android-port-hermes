@@ -716,7 +716,10 @@ class HermexUiFlowTest {
             }
         }
 
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("History stays here") && hasText("Default") }
+        // The profile pill now lives in the collapsed params sheet.
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("History stays here") }
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Default") }
         composeRule.onNodeWithText("Default").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Profile") }
         composeRule.onNodeWithText("Review").performClick()
@@ -1129,7 +1132,12 @@ class HermexUiFlowTest {
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithContentDescription("Message").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Hermex") }
+        // The workspace pill now lives in the collapsed params sheet.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Hermex") }
+        composeRule.onNodeWithTag("chat_params_sheet").assertIsDisplayed()
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
         composeRule.onNodeWithContentDescription("Files").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithContentDescription("Git").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithContentDescription("Refresh").fetchSemanticsNodes().isEmpty())
@@ -1139,8 +1147,8 @@ class HermexUiFlowTest {
         assertTrue(composeRule.onAllNodesWithText("Compress").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("Android Port").assertIsDisplayed()
         composeRule.onNodeWithText("Send a message to start the conversation.").assertIsDisplayed()
-        composeRule.onNodeWithText("25").assertIsDisplayed()
-        composeRule.onNodeWithText("25").performClick()
+        composeRule.onNodeWithTag("chat_context_gauge").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_context_gauge").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Context Window") }
         composeRule.onNodeWithText("2.0K / 8.0K").assertIsDisplayed()
         composeRule.onNodeWithText("Input").assertIsDisplayed()
@@ -1169,7 +1177,12 @@ class HermexUiFlowTest {
         composeRule.onNodeWithTag("workspace_picker_list")
             .performScrollToNode(androidx.compose.ui.test.hasText("Mobile"))
         composeRule.onNodeWithText("Mobile").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Mobile") }
+        // Selected workspace is shown on the params sheet row, not a strip pill.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Mobile") }
+        composeRule.onNodeWithTag("chat_params_sheet").assertIsDisplayed()
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
         composeRule.onNodeWithText("GPT-5").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         // Provider chips filter the catalog and auto-expand the selected group.
