@@ -2569,7 +2569,14 @@ private fun ComposerCompactControlsRow(
         if (state.isStreaming) {
             // Live status occupies the left slot; the gauge and params button
             // stay pinned so nothing shifts horizontally mid-answer.
-            StreamingStatusLabel()
+            StreamingStatusLabel(
+                // weight() is a RowScope extension, so it must be applied by
+                // the caller and passed in rather than used inside this
+                // composable, which has no RowScope receiver.
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .widthIn(max = 208.dp),
+            )
         } else if (showsModel) {
             Row(
                 modifier = Modifier
@@ -2661,15 +2668,13 @@ private fun ComposerCompactControlsRow(
 }
 
 @Composable
-private fun StreamingStatusLabel() {
+private fun StreamingStatusLabel(modifier: Modifier = Modifier) {
     val statusLabel = localizedString("Thinking")
     Row(
-        modifier = Modifier
+        modifier = modifier
             .testTag("chat_streaming_status")
             // Long localized status text must ellipsize rather than push the
             // gauge and params button off a narrow screen.
-            .weight(1f, fill = false)
-            .widthIn(max = 208.dp)
             .semantics { contentDescription = statusLabel },
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
