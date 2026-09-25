@@ -1160,7 +1160,11 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Camera").assertIsDisplayed()
         composeRule.onNodeWithText("Done").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Attach File") }
+        // Workspace moved into the collapsed params sheet; open it first.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_workspace_picker").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
         composeRule.waitUntil(timeoutMillis = 15_000) { hasText("Choose Workspace") }
         composeRule.onNodeWithTag("workspace_picker_list")
             .performScrollToNode(androidx.compose.ui.test.hasText("Mobile"))
@@ -2595,7 +2599,12 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Voice note").assertIsDisplayed().assertHasClickAction()
 
         composeRule.onNodeWithContentDescription("Message").performClick()
+        // Profile moved into the collapsed params sheet; open it first.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_profile_selector").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_profile_selector").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
         composeRule.onNodeWithTag("chat_model_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()

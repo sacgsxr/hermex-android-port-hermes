@@ -1231,6 +1231,7 @@ fun ChatRoute(
                             onOpenModelPicker = { showsModelPicker = true },
                             onOpenProfilePicker = { showsProfilePicker = true },
                             onOpenWorkspacePicker = { showsWorkspacePicker = true },
+                            onSelectReasoning = { effort -> viewModel.selectReasoning(effort) },
                             onLoadWorkspaceSuggestions = viewModel::loadWorkspaceSuggestions,
                             onAttach = { showsAttachmentOptions = true },
                             onVoiceDictation = requestVoiceDictation,
@@ -2323,6 +2324,7 @@ private fun ComposerSurface(
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
     onOpenWorkspacePicker: () -> Unit,
+    onSelectReasoning: (String) -> Unit,
     onLoadWorkspaceSuggestions: (String) -> Unit,
     onAttach: () -> Unit,
     onVoiceDictation: () -> Unit,
@@ -2393,6 +2395,7 @@ private fun ComposerSurface(
                 onOpenModelPicker = onOpenModelPicker,
                 onOpenProfilePicker = onOpenProfilePicker,
                 onOpenWorkspacePicker = onOpenWorkspacePicker,
+                onSelectReasoning = onSelectReasoning,
             )
         }
         Column(
@@ -2536,13 +2539,16 @@ private fun ComposerCompactControlsRow(
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
     onOpenWorkspacePicker: () -> Unit,
+    onSelectReasoning: (String) -> Unit,
 ) {
     val contextSnapshot = state.contextWindowSnapshot
     val showsProfile = state.showsProfileControl
     val showsWorkspace = state.hasWorkspaceChoices
     val showsModel = state.selectedModel != null || state.isLoadingComposerConfig || state.modelOptions.isNotEmpty()
-    if (!showsModel && !showsProfile && !showsWorkspace && contextSnapshot?.percentage == null) return
-    val controlsEnabled = !state.isStreaming && !state.isViewingCachedData && !state.isRunningSessionAction
+    val showsReasoning = state.showsReasoningControl
+    val showsContext = contextSnapshot?.percentage != null
+    if (!showsModel && !showsProfile && !showsWorkspace && !showsContext) return
+    val controlsEnabled = !state.isViewingCachedData && !state.isRunningSessionAction
     val modelTitle = state.selectedModel?.displayModelTitle
         ?: if (state.isLoadingComposerConfig && state.modelOptions.isEmpty()) {
             localizedString("Loading models...")
@@ -2550,18 +2556,24 @@ private fun ComposerCompactControlsRow(
             localizedString("Choose Model")
         }
     val modelLocation = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries)
+    var showParamsSheet by remember { mutableStateOf(false) }
+    var showContextSheet by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 2.dp, end = 2.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .height(30.dp)
+            .padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (showsModel) {
+        if (state.isStreaming) {
+            // Live status occupies the left slot; the gauge and params button
+            // stay pinned so nothing shifts horizontally mid-answer.
+            StreamingStatusLabel()
+        } else if (showsModel) {
             Row(
                 modifier = Modifier
                     .weight(1f, fill = false)
-                    .height(34.dp)
+                    .height(30.dp)
                     .clip(HermexPillShape)
                     .hermexGlass(shape = HermexPillShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
                     .clickable(enabled = controlsEnabled, onClick = onOpenModelPicker)
@@ -2569,20 +2581,24 @@ private fun ComposerCompactControlsRow(
                     .semantics(mergeDescendants = true) {
                         contentDescription = "Model: $modelTitle, ${modelLocation.label}"
                     }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                    Text(
-                        modelTitle,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+                Text(
+                    modelTitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
                 ModelExecutionBadge(modelLocation)
                 Text(
                     "⌄",
@@ -2591,32 +2607,300 @@ private fun ComposerCompactControlsRow(
                 )
             }
         }
-        if (showsProfile) {
-            HermexSelectorPill(
-                label = state.profileTitle,
-                onClick = onOpenProfilePicker,
-                modifier = Modifier.testTag("chat_profile_selector"),
-                enabled = controlsEnabled,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_user_round_cog,
-                maxWidth = 150.dp,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-            )
-        }
-        if (showsWorkspace) {
-            HermexSelectorPill(
-                label = state.workspaceTitle,
-                onClick = onOpenWorkspacePicker,
-                enabled = controlsEnabled,
-                leadingIcon = com.uzairansar.hermex.R.drawable.ic_lucide_folder,
-                maxWidth = 150.dp,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                modifier = Modifier.testTag("chat_workspace_picker"),
-            )
-        }
-        contextSnapshot?.let { snapshot ->
-            if (snapshot.percentage != null) {
-                ContextWindowIndicator(snapshot = snapshot)
+        Spacer(Modifier.weight(1f))
+        if (showsContext) {
+            contextSnapshot?.let { snapshot ->
+                ContextWindowGauge(
+                    snapshot = snapshot,
+                    modifier = Modifier.testTag("chat_context_gauge"),
+                    onClick = { showContextSheet = true },
+                )
             }
+        }
+        ComposerParamsButton(
+            enabled = controlsEnabled,
+            onClick = { showParamsSheet = true },
+        )
+    }
+    if (showContextSheet) {
+        contextSnapshot?.let { snapshot ->
+            ContextWindowDetailsSheet(
+                snapshot = snapshot,
+                onDismiss = { showContextSheet = false },
+            )
+        }
+    }
+    if (showParamsSheet) {
+        ComposerParamsSheet(
+            state = state,
+            modelTitle = modelTitle,
+            modelLocation = modelLocation,
+            onDismiss = { showParamsSheet = false },
+            onOpenModelPicker = {
+                showParamsSheet = false
+                onOpenModelPicker()
+            },
+            onOpenProfilePicker = {
+                showParamsSheet = false
+                onOpenProfilePicker()
+            },
+            onOpenWorkspacePicker = {
+                showParamsSheet = false
+                onOpenWorkspacePicker()
+            },
+            onSelectReasoning = onSelectReasoning,
+        )
+    }
+}
+
+@Composable
+private fun StreamingStatusLabel() {
+    val statusLabel = localizedString("Thinking")
+    Row(
+        modifier = Modifier
+            .testTag("chat_streaming_status")
+            .semantics { contentDescription = statusLabel },
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(10.dp),
+            strokeWidth = 1.5.dp,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = statusLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ComposerParamsButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Image(
+        painter = painterResource(com.uzairansar.hermex.R.drawable.ic_lucide_sliders_horizontal),
+        contentDescription = localizedString("Parameters"),
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .size(30.dp)
+            .clip(CircleShape)
+            .hermexGlass(shape = CircleShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
+            .clickable(enabled = enabled, onClick = onClick)
+            .testTag("chat_params_button")
+            .padding(7.dp),
+        colorFilter = ColorFilter.tint(
+            MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.82f else 0.34f),
+        ),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposerParamsSheet(
+    state: ChatUiState,
+    modelTitle: String,
+    modelLocation: ModelExecutionLocation,
+    onDismiss: () -> Unit,
+    onOpenModelPicker: () -> Unit,
+    onOpenProfilePicker: () -> Unit,
+    onOpenWorkspacePicker: () -> Unit,
+    onSelectReasoning: (String) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        sheetGesturesEnabled = false,
+        dragHandle = null,
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+        scrimColor = Color.Black.copy(alpha = 0.52f),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.86f)
+                .navigationBarsPadding()
+                .hermexGlass(
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    surfaceLevel = HermexSurfaceLevel.Floating,
+                )
+                .testTag("chat_params_sheet"),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(HermexPillShape)
+                        .background(MaterialTheme.colorScheme.outlineVariant),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = localizedString("Parameters"),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = onDismiss) {
+                    Text(localizedString("Done"))
+                }
+            }
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item(key = "model") {
+                    PickerSectionHeader("Model")
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SelectorRow(
+                        title = modelTitle,
+                        subtitle = modelLocation.label,
+                        selected = true,
+                        onClick = onOpenModelPicker,
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(start = 52.dp),
+                    )
+                }
+                if (state.showsReasoningControl) {
+                    items(state.reasoningOptions, key = { "reasoning-$it" }) { effort ->
+                        SelectorRow(
+                            title = localizedString(ReasoningEffortOption.titleFor(effort)),
+                            subtitle = null,
+                            selected = effort == state.selectedReasoning,
+                            onClick = {
+                                onDismiss()
+                                onSelectReasoning(effort)
+                            },
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(start = 52.dp),
+                        )
+                    }
+                }
+                if (state.showsProfileControl) {
+                    item(key = "profile") {
+                        PickerSectionHeader("Profile")
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        SelectorRow(
+                            title = state.profileTitle,
+                            subtitle = null,
+                            selected = true,
+                            onClick = onOpenProfilePicker,
+                            testTag = "chat_profile_selector",
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(start = 52.dp),
+                        )
+                    }
+                }
+                if (state.hasWorkspaceChoices) {
+                    item(key = "workspace") {
+                        PickerSectionHeader("Project folder")
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        SelectorRow(
+                            title = state.workspaceTitle,
+                            subtitle = null,
+                            selected = true,
+                            onClick = onOpenWorkspacePicker,
+                            testTag = "chat_workspace_picker",
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(start = 52.dp),
+                        )
+                    }
+                }
+                state.contextWindowSnapshot?.let { snapshot ->
+                    item(key = "context") {
+                        PickerSectionHeader("Context remaining")
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        ) {
+                            ContextWindowGauge(snapshot = snapshot, showLabel = false)
+                            Text(
+                                text = snapshot.tokensLabel(),
+                                modifier = Modifier.padding(top = 8.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextWindowGauge(
+    snapshot: ContextWindowSnapshot,
+    modifier: Modifier = Modifier,
+    showLabel: Boolean = true,
+    onClick: (() -> Unit)? = null,
+) {
+    val percentage = snapshot.percentage ?: return
+    val clamped = percentage.coerceIn(0.0, 1.0)
+    val gaugeColor = when {
+        clamped >= 0.85f -> MaterialTheme.colorScheme.error
+        clamped >= 0.65f -> Color(0xFFD29922)
+        else -> Color(0xFF3FB950)
+    }
+    val contextWindowLabel = localizedString("Context Window")
+    val percentageLabel = "${(clamped * 100).toInt()}%"
+    val description = "$contextWindowLabel $percentageLabel"
+    Row(
+        modifier = modifier
+            .height(30.dp)
+            .clip(HermexPillShape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .semantics(mergeDescendants = true) { contentDescription = description }
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(44.dp)
+                .height(5.dp)
+                .clip(HermexPillShape)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.13f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(clamped.toFloat())
+                    .fillMaxHeight()
+                    .clip(HermexPillShape)
+                    .background(gaugeColor),
+            )
+        }
+        if (showLabel) {
+            Text(
+                text = percentageLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = gaugeColor,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -3909,12 +4193,14 @@ private fun SelectorRow(
     subtitle: String?,
     selected: Boolean,
     onClick: () -> Unit,
+    testTag: String? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(HermexCardShape)
             .clickable(onClick = onClick)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
             .padding(horizontal = 16.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
