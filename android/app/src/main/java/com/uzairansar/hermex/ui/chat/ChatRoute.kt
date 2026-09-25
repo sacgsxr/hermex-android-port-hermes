@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -2581,6 +2582,9 @@ private fun ComposerCompactControlsRow(
                     .semantics(mergeDescendants = true) {
                         contentDescription = "Model: $modelTitle, ${modelLocation.label}"
                     }
+                    // Cap the pill so a long model name can never crowd the
+                    // context gauge or the params button off a narrow screen.
+                    .widthIn(max = 208.dp)
                     .padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2606,8 +2610,11 @@ private fun ComposerCompactControlsRow(
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
+        } else {
+            // Neither a status label nor a model pill: keep the gauge and the
+            // params button flush right instead of collapsing to the start.
+            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.weight(1f))
         if (showsContext) {
             contextSnapshot?.let { snapshot ->
                 ContextWindowGauge(
@@ -2659,6 +2666,10 @@ private fun StreamingStatusLabel() {
     Row(
         modifier = Modifier
             .testTag("chat_streaming_status")
+            // Long localized status text must ellipsize rather than push the
+            // gauge and params button off a narrow screen.
+            .weight(1f, fill = false)
+            .widthIn(max = 208.dp)
             .semantics { contentDescription = statusLabel },
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2875,6 +2886,9 @@ private fun ContextWindowGauge(
             .clip(HermexPillShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .semantics(mergeDescendants = true) { contentDescription = description }
+            // The gauge is a fixed-size readout, not flexible content: keep it
+            // at full width even when the row is tight.
+            .wrapContentWidth(unbounded = false)
             .padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
