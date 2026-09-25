@@ -2419,8 +2419,8 @@ private fun ComposerSurface(
                 onValueChange = onDraftChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 52.dp, max = 132.dp)
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                    .heightIn(min = 40.dp, max = 132.dp)
+                    .padding(horizontal = 18.dp, vertical = 9.dp)
                     .semantics { contentDescription = messageDescription },
                 enabled = !state.isViewingCachedData,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
