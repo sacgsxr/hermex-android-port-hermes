@@ -2572,58 +2572,64 @@ private fun ComposerCompactControlsRow(
             // app's own phase resolver so the label tracks the real turn state
             // (thinking -> responding -> running tool) instead of a fixed word.
             val turnIndicator = state.activeTurnIndicator()
-            StreamingStatusLabel(
-                label = turnIndicator?.label ?: localizedString("Thinking"),
-                // weight() is a RowScope extension, so it must be applied by
-                // the caller and passed in rather than used inside this
-                // composable, which has no RowScope receiver.
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .widthIn(max = 168.dp),
-            )
-        } else if (showsModel) {
-            Row(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .height(30.dp)
-                    .clip(HermexPillShape)
-                    .hermexGlass(shape = HermexPillShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
-                    .clickable(enabled = controlsEnabled, onClick = onOpenModelPicker)
-                    .testTag("chat_model_selector")
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = "Model: $modelTitle, ${modelLocation.label}"
-                    }
-                    // Cap the pill so a long model name can never crowd the
-                    // context gauge or the params button off a narrow screen.
-                    .widthIn(max = 168.dp)
-                    .padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
+            // The slot takes the slack (weight 1f, fill = true) and the label
+            // caps its own width, so the right-hand controls stay flush right.
+            Box(modifier = Modifier.weight(1f)) {
+                StreamingStatusLabel(
+                    label = turnIndicator?.label ?: localizedString("Thinking"),
                     modifier = Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-                Text(
-                    modelTitle,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                ModelExecutionBadge(modelLocation)
-                Text(
-                    "⌄",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                        .widthIn(max = 168.dp)
+                        .align(Alignment.CenterStart),
                 )
             }
+        } else if (showsModel) {
+            Box(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier
+                        .height(30.dp)
+                        .clip(HermexPillShape)
+                        .hermexGlass(shape = HermexPillShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
+                        .clickable(enabled = controlsEnabled, onClick = onOpenModelPicker)
+                        .testTag("chat_model_selector")
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "Model: $modelTitle, ${modelLocation.label}"
+                        }
+                        // Cap the pill so a long model name can never crowd the
+                        // context gauge or the params button off a narrow screen.
+                        .widthIn(max = 168.dp)
+                        .align(Alignment.CenterStart)
+                        .padding(horizontal = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                    Text(
+                        modelTitle,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    // The badge is secondary: let it ellipsize before it steals
+                    // width from the model name on a narrow strip.
+                    ModelExecutionBadge(modelLocation, maxWidth = 64.dp)
+                    Text(
+                        "⌄",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+            }
         } else {
-            // Neither a status label nor a model pill: keep the gauge and the
-            // params button flush right instead of collapsing to the start.
+            // Neither a status label nor a model pill: still consume the slack
+            // so the gauge and params button stay flush right.
             Spacer(Modifier.weight(1f))
         }
         if (showsContext) {
@@ -2952,16 +2958,18 @@ private fun ComposerInlineIconButton(
 }
 
 @Composable
-private fun ModelExecutionBadge(location: ModelExecutionLocation) {
+private fun ModelExecutionBadge(location: ModelExecutionLocation, maxWidth: Dp? = null) {
     Text(
         location.label,
         modifier = Modifier
+            .then(if (maxWidth != null) Modifier.widthIn(max = maxWidth) else Modifier)
             .clip(HermexPillShape)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
