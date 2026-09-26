@@ -88,6 +88,36 @@ internal fun ChatUiState.activeTurnIndicator(): ActiveTurnIndicator? {
     )
 }
 
+/**
+ * Whether the floating active-turn pill should render above the composer.
+ *
+ * The pill and the composer's compact controls row both draw a spinner plus the
+ * activity word, and they occupy the same vertical band, so rendering both
+ * stacks two "Thinking" labels on top of each other. The controls row is the
+ * richer readout (it also carries the context gauge and params button), so it
+ * wins when it is on screen.
+ *
+ * Blocking states the user must act on are exempt: approval, clarification, and
+ * recovery need to be unmissable, so they keep their own indicator.
+ */
+internal fun shouldShowFloatingActiveTurnPill(
+    indicator: ActiveTurnIndicator?,
+    compactControlsVisible: Boolean,
+    isStreaming: Boolean,
+): Boolean {
+    if (indicator == null) return false
+    if (!compactControlsVisible || !isStreaming) return true
+    return when (indicator.activity) {
+        ActiveTurnIndicatorActivity.WaitingForApproval,
+        ActiveTurnIndicatorActivity.WaitingForInput,
+        ActiveTurnIndicatorActivity.Reconnecting,
+        ActiveTurnIndicatorActivity.Checking,
+        -> true
+
+        else -> false
+    }
+}
+
 private fun String.safeToolName(): String? {
     if (trim().equals("Tool running", ignoreCase = true)) return null
     val firstToken = trim()
