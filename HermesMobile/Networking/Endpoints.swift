@@ -72,6 +72,7 @@ enum Endpoint {
     case gitCommitMessageSelected
     case models
     case modelsLive
+    case modelsRefresh
     case commands
     case defaultModel
     case reasoning(model: String? = nil, provider: String? = nil)
@@ -272,6 +273,8 @@ enum Endpoint {
             return "/api/models"
         case .modelsLive:
             return "/api/models/live"
+        case .modelsRefresh:
+            return "/api/models/refresh"
         case .commands:
             return "/api/commands"
         case .defaultModel:
