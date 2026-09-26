@@ -3,6 +3,7 @@ package com.uzairansar.hermex.ui.chat
 import com.uzairansar.hermex.core.model.PendingApproval
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,5 +71,73 @@ class ActiveTurnIndicatorPolicyTest {
         )
         assertTrue(ChatUiState(isStreaming = true, activeStreamId = null).activeTurnIndicator()?.label == "Starting response")
         assertNull(ChatUiState(isStreaming = false).activeTurnIndicator())
+    }
+
+    /**
+     * Regression: the floating ActiveTurnStatusPill and the composer's compact
+     * controls row both render a spinner plus the same activity word in the same
+     * vertical band, so during a thinking turn two "Thinking" labels drew on top
+     * of each other. The pill must stand down whenever the controls row is
+     * already showing a live status label.
+     */
+    @Test
+    fun pillStandsDownWhenTheStatusRowAlreadyShowsTheLabel() {
+        val state = ChatUiState(
+            isStreaming = true,
+            activeStreamId = "stream-1",
+            liveReasoning = "The user is asking about the overlap",
+        )
+        assertNotNull(state.activeTurnIndicator())
+        assertFalse(
+            shouldShowFloatingActiveTurnPill(
+                indicator = state.activeTurnIndicator(),
+                compactControlsVisible = true,
+                isStreaming = true,
+            ),
+        )
+    }
+
+    @Test
+    fun pillReturnsWhenTheControlsRowIsHidden() {
+        assertTrue(
+            shouldShowFloatingActiveTurnPill(
+                indicator = ChatUiState(
+                    isStreaming = true,
+                    activeStreamId = "stream-1",
+                    liveReasoning = "thinking",
+                ).activeTurnIndicator(),
+                compactControlsVisible = false,
+                isStreaming = true,
+            ),
+        )
+    }
+
+    @Test
+    fun pillNeverShowsWithoutAnIndicator() {
+        assertFalse(
+            shouldShowFloatingActiveTurnPill(
+                indicator = null,
+                compactControlsVisible = true,
+                isStreaming = true,
+            ),
+        )
+    }
+
+    /**
+     * Approval and clarification are blocking states the user must act on, so
+     * they keep their own floating indicator regardless of the controls row.
+     */
+    @Test
+    fun blockingStatesKeepTheirPillEvenWithTheControlsRowVisible() {
+        assertTrue(
+            shouldShowFloatingActiveTurnPill(
+                indicator = ChatUiState(
+                    isStreaming = true,
+                    pendingApproval = PendingApproval(id = "approval-1"),
+                ).activeTurnIndicator(),
+                compactControlsVisible = true,
+                isStreaming = true,
+            ),
+        )
     }
 }
