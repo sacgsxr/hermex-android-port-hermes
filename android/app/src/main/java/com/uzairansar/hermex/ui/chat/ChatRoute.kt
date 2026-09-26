@@ -1170,7 +1170,14 @@ fun ChatRoute(
                         ),
                     ),
             )
-            state.activeTurnIndicator()?.let { indicator ->
+            // Only float the pill when the compact controls row is NOT already
+            // rendering a live status label. Both draw a spinner plus the same
+            // activity word, and they occupy the same vertical band above the
+            // composer, so showing both stacks two "Thinking" labels on top of
+            // each other. The controls row is the richer readout (it also holds
+            // the context gauge and params button), so it wins when visible.
+            val pillWouldDuplicateStatusRow = !isReadingOlderTranscript && state.isStreaming
+            state.activeTurnIndicator()?.takeIf { !pillWouldDuplicateStatusRow }?.let { indicator ->
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
