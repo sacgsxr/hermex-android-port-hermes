@@ -1609,6 +1609,18 @@ data class ModelsLiveResponse(
 )
 
 @Serializable
+data class ModelsRefreshRequest(
+    val provider: String,
+)
+
+@Serializable
+data class ModelsRefreshResponse(
+    val ok: Boolean? = null,
+    val provider: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
 data class ModelSummary(
     val id: String? = null,
     val name: String? = null,
