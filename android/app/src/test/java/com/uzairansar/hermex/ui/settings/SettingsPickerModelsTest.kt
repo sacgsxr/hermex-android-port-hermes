@@ -59,6 +59,53 @@ class SettingsPickerModelsTest {
     }
 
     @Test
+    fun openAiLiveModelsAreReducedToTenCurrentChatAndCodingAliases() {
+        val ids = listOf(
+            "gpt-6", "gpt-6-pro", "gpt-6-codex", "gpt-6-mini", "gpt-6-nano",
+            "gpt-5.6", "gpt-5.6-pro", "gpt-5.6-codex", "gpt-5.6-mini", "gpt-5.6-nano",
+            "gpt-5.5", "gpt-5.4", "o4-mini", "text-embedding-4-large", "gpt-image-2",
+            "gpt-6-2026-09-01", "ft:gpt-6:example",
+        )
+
+        val selected = selectCurrentOpenAiModels(
+            models = ids.map { ModelSummary(id = it, provider = "openai") },
+            limit = 10,
+        ).mapNotNull { it.id }
+
+        assertEquals(10, selected.size)
+        assertTrue("gpt-6" in selected)
+        assertTrue("gpt-5.6-nano" in selected)
+        assertFalse("gpt-5.5" in selected)
+        assertFalse("text-embedding-4-large" in selected)
+        assertFalse("gpt-image-2" in selected)
+        assertFalse("gpt-6-2026-09-01" in selected)
+        assertFalse("ft:gpt-6:example" in selected)
+    }
+
+    @Test
+    fun openAiSelectionRetainsTheConfiguredModelOutsideTheCurrentTen() {
+        val models = (1..12).map { minor -> ModelSummary(id = "gpt-5.$minor", provider = "openai") }
+        val retained = ModelSummary(id = "gpt-4.1", provider = "openai")
+
+        val selected = selectCurrentOpenAiModels(models, retainedModel = retained).mapNotNull { it.id }
+
+        assertEquals(11, selected.size)
+        assertEquals("gpt-4.1", selected.last())
+    }
+
+    @Test
+    fun otherProvidersAreAlsoCappedAtTenAndRetainTheConfiguredModel() {
+        val models = (1..12).map { index -> ModelSummary(id = "claude-$index", provider = "anthropic") }
+        val retained = ModelSummary(id = "claude-legacy", provider = "anthropic")
+
+        val selected = selectCurrentProviderModels("anthropic", models, retained).mapNotNull { it.id }
+
+        assertEquals(11, selected.size)
+        assertEquals((1..10).map { "claude-$it" }, selected.take(10))
+        assertEquals("claude-legacy", selected.last())
+    }
+
+    @Test
     fun defaultModelGroupsUseProviderNamesAndSearch() {
         val groups = defaultModelPickerGroups(
             models = listOf(

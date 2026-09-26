@@ -1617,16 +1617,42 @@ class SettingsViewModel(
         }
     }
 
-    private fun refreshLiveModels() {
+    fun scanForModels() {
+        refreshLiveModels(forceProviderRefresh = true)
+    }
+
+    private fun refreshLiveModels(forceProviderRefresh: Boolean = false) {
         val repository = panelsRepository ?: return
         viewModelScope.launch {
-            _state.update { it.copy(isLoadingLiveModels = true) }
-            runSuspendCatching { repository.modelsLive() }
-                .onSuccess { live ->
-                    _state.update { it.copy(isLoadingLiveModels = false, models = overlayLiveModels(it.models, live)) }
+            val provider = _state.value.activeProvider?.trim()?.takeIf { it.isNotBlank() }
+                ?: _state.value.defaultModelProvider?.trim()?.takeIf { it.isNotBlank() }
+            _state.update { it.copy(isLoadingLiveModels = true, defaultModelPickerError = null) }
+            runSuspendCatching {
+                if (forceProviderRefresh) {
+                    requireNotNull(provider) { "The server did not report an active model provider." }
+                    val refresh = repository.refreshModels(provider)
+                    check(refresh.ok == true && refresh.error.isNullOrBlank()) {
+                        refresh.error?.trim()?.takeIf { it.isNotBlank() } ?: "The server could not refresh models."
+                    }
                 }
-                .onFailure {
-                    _state.update { it.copy(isLoadingLiveModels = false) }
+                repository.modelsLive()
+            }
+                .onSuccess { live ->
+                    _state.update {
+                        it.copy(
+                            isLoadingLiveModels = false,
+                            models = overlayLiveModels(it.models, live, it.defaultModel),
+                            notice = if (forceProviderRefresh) "Model catalog refreshed." else it.notice,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            isLoadingLiveModels = false,
+                            defaultModelPickerError = error.message ?: "Could not refresh models.",
+                        )
+                    }
                 }
         }
     }
