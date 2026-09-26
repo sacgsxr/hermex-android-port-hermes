@@ -211,6 +211,8 @@ class HermesApiClient(
     }
     suspend fun models(): ModelCatalogResponse = get(Endpoint.Models)
     suspend fun modelsLive(): ModelsLiveResponse = get(Endpoint.ModelsLive)
+    suspend fun refreshModels(provider: String): ModelsRefreshResponse =
+        post(Endpoint.ModelsRefresh, ModelsRefreshRequest(provider))
     suspend fun commands(): CommandsResponse = get(Endpoint.Commands)
     suspend fun profiles(): ProfilesResponse = get(Endpoint.Profiles)
     suspend fun switchProfile(profile: String): ProfileSwitchResponse {

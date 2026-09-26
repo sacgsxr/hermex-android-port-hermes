@@ -32,9 +32,10 @@ object ProfileNameRules {
 fun overlayLiveModels(
     catalogModels: List<ModelSummary>,
     live: ModelsLiveResponse,
+    selectedModelId: String? = null,
 ): List<ModelSummary> {
     val provider = live.provider?.trim()?.takeIf { it.isNotBlank() } ?: return catalogModels
-    val liveModels = live.models.orEmpty()
+    var liveModels = live.models.orEmpty()
         .map { model ->
             if (model.normalizedProvider == null) {
                 model.copy(provider = provider)
@@ -46,7 +47,111 @@ fun overlayLiveModels(
     if (liveModels.isEmpty()) return catalogModels
 
     val providerKey = provider.lowercase(Locale.US)
+    val selected = catalogModels.firstOrNull { model ->
+        model.normalizedProvider?.lowercase(Locale.US) == providerKey &&
+            model.modelIdentifier == selectedModelId
+    }
+    liveModels = selectCurrentProviderModels(providerKey, liveModels, selected)
     return catalogModels.filter { it.normalizedProvider?.lowercase(Locale.US) != providerKey } + liveModels
+}
+
+internal fun selectCurrentProviderModels(
+    provider: String,
+    models: List<ModelSummary>,
+    retainedModel: ModelSummary? = null,
+    limit: Int = 10,
+): List<ModelSummary> {
+    if (provider == "openai" || provider == "openai-codex") {
+        return selectCurrentOpenAiModels(models, retainedModel, limit)
+    }
+    val selected = models
+        .distinctBy { it.modelIdentifier?.lowercase(Locale.US) }
+        .take(limit.coerceAtLeast(0))
+        .toMutableList()
+    val retainedId = retainedModel?.modelIdentifier
+    if (retainedId != null && selected.none { it.modelIdentifier.equals(retainedId, ignoreCase = true) }) {
+        selected += retainedModel
+    }
+    return selected
+}
+
+internal fun selectCurrentOpenAiModels(
+    models: List<ModelSummary>,
+    retainedModel: ModelSummary? = null,
+    limit: Int = 10,
+): List<ModelSummary> {
+    val relevant = models
+        .distinctBy { it.modelIdentifier?.lowercase(Locale.US) }
+        .filter { model -> model.modelIdentifier?.isCurrentOpenAiChatModel() == true }
+        .sortedWith(
+            compareByDescending<ModelSummary> { it.modelIdentifier?.openAiVersionRank() ?: OpenAiVersionRank.Zero }
+                .thenByDescending { it.modelIdentifier?.openAiVariantRank() ?: 0 }
+                .thenBy { it.modelIdentifier.orEmpty() },
+        )
+        .take(limit.coerceAtLeast(0))
+    val retainedId = retainedModel?.modelIdentifier
+    return if (retainedId != null && relevant.none { it.modelIdentifier.equals(retainedId, ignoreCase = true) }) {
+        relevant + retainedModel
+    } else {
+        relevant
+    }
+}
+
+private val openAiSnapshotDate = Regex("(?:^|-)20\\d{2}-\\d{2}-\\d{2}(?:$|-)")
+private val openAiVersion = Regex("^(?:gpt-|chatgpt-)?(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?")
+private val openAiReasoningVersion = Regex("^o(\\d+)(?:[.-](\\d+))?")
+
+private fun String.isCurrentOpenAiChatModel(): Boolean {
+    val id = lowercase(Locale.US)
+    if (openAiSnapshotDate.containsMatchIn(id) || id.startsWith("ft:")) return false
+    if (listOf(
+            "embedding", "moderation", "whisper", "tts", "audio", "realtime",
+            "transcrib", "image", "dall-e", "sora", "search-preview", "computer-use",
+            "babbage", "davinci",
+        ).any(id::contains)
+    ) return false
+    return id.startsWith("gpt-") || id.startsWith("chatgpt-") ||
+        openAiReasoningVersion.containsMatchIn(id) || id.startsWith("codex-")
+}
+
+private data class OpenAiVersionRank(val major: Int, val minor: Int, val patch: Int) : Comparable<OpenAiVersionRank> {
+    override fun compareTo(other: OpenAiVersionRank): Int =
+        compareValuesBy(this, other, OpenAiVersionRank::major, OpenAiVersionRank::minor, OpenAiVersionRank::patch)
+
+    companion object {
+        val Zero = OpenAiVersionRank(0, 0, 0)
+    }
+}
+
+private fun String.openAiVersionRank(): OpenAiVersionRank {
+    val id = lowercase(Locale.US)
+    val match = openAiVersion.find(id)
+    if (match != null) {
+        return OpenAiVersionRank(
+            major = match.groupValues[1].toIntOrNull() ?: 0,
+            minor = match.groupValues[2].toIntOrNull() ?: 0,
+            patch = match.groupValues[3].toIntOrNull() ?: 0,
+        )
+    }
+    val reasoning = openAiReasoningVersion.find(id)
+    return OpenAiVersionRank(
+        major = reasoning?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0,
+        minor = reasoning?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 0,
+        patch = 0,
+    )
+}
+
+private fun String.openAiVariantRank(): Int {
+    val id = lowercase(Locale.US)
+    return when {
+        id.endsWith("-latest") -> 6
+        "pro" in id -> 5
+        "codex" in id -> 4
+        "chat" in id -> 3
+        "mini" in id -> 2
+        "nano" in id -> 1
+        else -> 7
+    }
 }
 
 fun defaultModelPickerGroups(

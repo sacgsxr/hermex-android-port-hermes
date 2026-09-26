@@ -121,6 +121,7 @@ sealed class Endpoint(
     data object GitCommitMessageSelected : Endpoint("/api/git/commit-message-selected")
     data object Models : Endpoint("/api/models")
     data object ModelsLive : Endpoint("/api/models/live")
+    data object ModelsRefresh : Endpoint("/api/models/refresh")
     data object Commands : Endpoint("/api/commands")
     data object DefaultModel : Endpoint("/api/default-model")
     data class Reasoning(val model: String? = null, val provider: String? = null) : Endpoint(
