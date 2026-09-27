@@ -2664,11 +2664,11 @@ class HermexUiFlowTest {
             assertTrue("expected the picker provider row to keep its location badge", nodes.isNotEmpty())
         }
         composeRule.onNodeWithText("High").performClick()
-        // Selecting reasoning can return to the composer; the model row lives in
-        // the sheet, so make sure it is open before asserting on it.
-        if (!hasText("Parameters")) {
-            composeRule.onNodeWithTag("chat_params_button").performClick()
-        }
+        // Reasoning selection leaves the model picker open. Close it before
+        // reopening Parameters; the button is behind the modal until then.
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Choose Model") }
+        composeRule.onNodeWithTag("chat_params_button").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
         composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
