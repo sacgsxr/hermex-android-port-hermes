@@ -64,9 +64,12 @@ internal fun selectCurrentProviderModels(
     if (provider == "openai" || provider == "openai-codex") {
         return selectCurrentOpenAiModels(models, retainedModel, limit)
     }
+    // The local router advertises only configured models backed by installed files;
+    // don't drop selectable variants simply because there are more than ten aliases.
+    val providerLimit = if (provider.equals("local-gguf", ignoreCase = true)) Int.MAX_VALUE else limit
     val selected = models
         .distinctBy { it.modelIdentifier?.lowercase(Locale.US) }
-        .take(limit.coerceAtLeast(0))
+        .take(providerLimit.coerceAtLeast(0))
         .toMutableList()
     val retainedId = retainedModel?.modelIdentifier
     if (retainedId != null && selected.none { it.modelIdentifier.equals(retainedId, ignoreCase = true) }) {
