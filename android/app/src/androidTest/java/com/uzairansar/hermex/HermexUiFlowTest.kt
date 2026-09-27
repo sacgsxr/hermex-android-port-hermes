@@ -1268,6 +1268,10 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Message").performTextInput("/personality none")
         composeRule.onNodeWithContentDescription("Send").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { chatPersonalityBodies.any { it.contains(""""name":""""") } }
+        // Model selection lives in the params sheet now, behind the single
+        // composer button.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Model") }
         composeRule.onNodeWithTag("chat_model_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") && hasText("High") }
         composeRule.onNodeWithText("High").performClick()
@@ -2608,14 +2612,14 @@ class HermexUiFlowTest {
             }
         }
 
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Very Long Model Name For Large Text") }
-        val selectorBounds = composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue(selectorBounds.width > 0)
+        // The model name no longer sits in the composer row: model selection
+        // moved into the params sheet behind the single button, so a long name
+        // can never crowd the context gauge or that button off a narrow screen.
         composeRule.onNodeWithContentDescription("Dictate").assertIsDisplayed().assertHasClickAction()
         composeRule.onNodeWithContentDescription("Voice note").assertIsDisplayed().assertHasClickAction()
 
         composeRule.onNodeWithContentDescription("Message").performClick()
-        // Profile moved into the collapsed params sheet; open it first.
+        // Profile and model both live in the collapsed params sheet; open it first.
         composeRule.onNodeWithTag("chat_params_button").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_profile_selector").assertIsDisplayed()
@@ -2626,7 +2630,9 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
         composeRule.onNodeWithTag("model_provider_openai").performClick()
-        assertTrue(composeRule.onAllNodesWithText("Remote").fetchSemanticsNodes().isNotEmpty())
+        // The Model row now subtitles the active profile instead of the
+        // execution location, which read "Remote" for a local router.
+        composeRule.onNodeWithText("default").assertExists()
         composeRule.onNodeWithText("High").performClick()
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
         composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
