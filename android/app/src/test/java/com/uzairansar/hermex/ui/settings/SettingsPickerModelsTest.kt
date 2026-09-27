@@ -94,6 +94,22 @@ class SettingsPickerModelsTest {
     }
 
     @Test
+    fun localGgufRefreshKeepsEveryInstalledAliasIncludingBothUncensoredOptions() {
+        val models = (1..19).map { index -> ModelSummary(id = "local-$index", provider = "local-gguf") } +
+            listOf(
+                ModelSummary(id = "turbo-fcfusion-27b-mtp", provider = "local-gguf"),
+                ModelSummary(id = "swift-uncensored-q5ks", provider = "local-gguf"),
+            )
+        val refreshed = overlayLiveModels(
+            catalogModels = emptyList(),
+            live = ModelsLiveResponse(provider = "local-gguf", models = models, count = models.size),
+        )
+
+        assertEquals(models.map { it.id }, refreshed.map { it.id })
+        assertEquals(21, refreshed.size)
+    }
+
+    @Test
     fun otherProvidersAreAlsoCappedAtTenAndRetainTheConfiguredModel() {
         val models = (1..12).map { index -> ModelSummary(id = "claude-$index", provider = "anthropic") }
         val retained = ModelSummary(id = "claude-legacy", provider = "anthropic")
