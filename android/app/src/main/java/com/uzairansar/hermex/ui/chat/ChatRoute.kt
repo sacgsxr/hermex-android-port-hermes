@@ -2573,8 +2573,7 @@ private fun ComposerCompactControlsRow(
     // the gateway only flags ollama/lmstudio as self-hosted, so a local router
     // read "Remote" in every profile -- a constant that told you nothing.
     val profileBadge = resolveModelPillProfileBadge(
-        selectedProfileName = state.selectedProfile?.name
-            ?: state.selectedProfile?.displayName
+        selectedProfileName = state.selectedProfile?.displayTitle
             ?: state.sessionProfile,
         activeProfileName = state.activeProfileName,
     )

@@ -1183,7 +1183,11 @@ class HermexUiFlowTest {
         composeRule.onNodeWithTag("chat_params_sheet").assertIsDisplayed()
         composeRule.onNodeWithText("Done").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
-        composeRule.onNodeWithText("GPT-5").performClick()
+        // The model pill is gone; the Model row in the params sheet carries the
+        // name now, so open the sheet and tap that row instead.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("GPT-5") }
+        composeRule.onNodeWithTag("chat_model_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         // Provider chips filter the catalog and auto-expand the selected group.
         composeRule.onNodeWithTag("model_provider_filter_row").assertIsDisplayed()
@@ -2621,18 +2625,33 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Message").performClick()
         // Profile and model both live in the collapsed params sheet; open it first.
         composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            hasText("Parameters") && hasText("Very Long Model Name For Large Text")
+        }
+        // The Model row subtitles the active profile. It used to show execution
+        // location, which read "Remote" for a local router because the gateway
+        // only flags ollama/lmstudio as self-hosted.
+        composeRule.onAllNodesWithText("Default").fetchSemanticsNodes().let { nodes ->
+            assertTrue("expected the active profile to be badged on the Model row", nodes.isNotEmpty())
+        }
+        composeRule.onNodeWithTag("chat_params_sheet").assertIsDisplayed()
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
+
+        composeRule.onNodeWithTag("chat_params_button").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_profile_selector").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_profile_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_model_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Model") }
         composeRule.onNodeWithText("Reasoning").assertIsDisplayed()
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
         composeRule.onNodeWithTag("model_provider_openai").performClick()
-        // The Model row now subtitles the active profile instead of the
-        // execution location, which read "Remote" for a local router.
-        composeRule.onNodeWithText("default").assertExists()
+        // The picker's provider rows still carry execution location, unchanged.
+        composeRule.onNodeWithText("Remote").assertExists()
         composeRule.onNodeWithText("High").performClick()
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
         composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
