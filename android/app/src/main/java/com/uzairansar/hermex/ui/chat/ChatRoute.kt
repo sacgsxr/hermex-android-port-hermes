@@ -2567,7 +2567,16 @@ private fun ComposerCompactControlsRow(
         } else {
             localizedString("Choose Model")
         }
-    val modelLocation = ModelExecutionLocationResolver.resolve(state.selectedModel, state.providerSummaries)
+    // The model/profile pickers live in the params sheet behind the single
+    // button on the right. Its Model row subtitles the active profile, which
+    // is the fact you want at a glance; execution location used to sit here but
+    // the gateway only flags ollama/lmstudio as self-hosted, so a local router
+    // read "Remote" in every profile -- a constant that told you nothing.
+    val profileBadge = resolveModelPillProfileBadge(
+        selectedProfileName = state.selectedProfile?.displayTitle
+            ?: state.sessionProfile,
+        activeProfileName = state.activeProfileName,
+    )
     var showParamsSheet by remember { mutableStateOf(false) }
     var showContextSheet by remember { mutableStateOf(false) }
     Row(
@@ -2593,54 +2602,11 @@ private fun ComposerCompactControlsRow(
                         .align(Alignment.CenterStart),
                 )
             }
-        } else if (showsModel) {
-            Box(modifier = Modifier.weight(1f)) {
-                Row(
-                    modifier = Modifier
-                        .height(30.dp)
-                        .clip(HermexPillShape)
-                        .hermexGlass(shape = HermexPillShape, castsShadow = false, surfaceLevel = HermexSurfaceLevel.Raised)
-                        .clickable(enabled = controlsEnabled, onClick = onOpenModelPicker)
-                        .testTag("chat_model_selector")
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = "Model: $modelTitle, ${modelLocation.label}"
-                        }
-                        // Cap the pill so a long model name can never crowd the
-                        // context gauge or the params button off a narrow screen.
-                        .widthIn(max = 168.dp)
-                        .align(Alignment.CenterStart)
-                        .padding(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
-                    Text(
-                        modelTitle,
-                        modifier = Modifier.weight(1f, fill = false),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    // The badge is secondary: let it ellipsize before it steals
-                    // width from the model name on a narrow strip.
-                    ModelExecutionBadge(modelLocation, maxWidth = 64.dp)
-                    Text(
-                        "⌄",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-            }
         } else {
-            // Neither a status label nor a model pill: still consume the slack
-            // so the gauge and params button stay flush right.
+            // No model pill: the model, profile, and reasoning pickers all live
+            // in the params sheet behind the single button on the right, so the
+            // status row keeps only the context gauge and that one button.
+            // Still consume the slack so they stay flush right.
             Spacer(Modifier.weight(1f))
         }
         if (showsContext) {
@@ -2669,7 +2635,7 @@ private fun ComposerCompactControlsRow(
         ComposerParamsSheet(
             state = state,
             modelTitle = modelTitle,
-            modelLocation = modelLocation,
+            profileBadge = profileBadge,
             onDismiss = { showParamsSheet = false },
             onOpenModelPicker = {
                 showParamsSheet = false
@@ -2744,7 +2710,7 @@ private fun ComposerParamsButton(
 private fun ComposerParamsSheet(
     state: ChatUiState,
     modelTitle: String,
-    modelLocation: ModelExecutionLocation,
+    profileBadge: String?,
     onDismiss: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
@@ -2808,9 +2774,13 @@ private fun ComposerParamsSheet(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SelectorRow(
                         title = modelTitle,
-                        subtitle = modelLocation.label,
+                        // Profile, not execution location: the gateway only flags
+                        // ollama/lmstudio as self-hosted, so a local router used
+                        // to read "Remote" in every profile.
+                        subtitle = profileBadge,
                         selected = true,
                         onClick = onOpenModelPicker,
+                        testTag = "chat_model_selector",
                     )
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.outlineVariant,
