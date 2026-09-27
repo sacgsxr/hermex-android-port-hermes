@@ -2636,6 +2636,7 @@ private fun ComposerCompactControlsRow(
         ComposerParamsSheet(
             state = state,
             modelTitle = modelTitle,
+            profileBadge = profileBadge,
             onDismiss = { showParamsSheet = false },
             onOpenModelPicker = {
                 showParamsSheet = false
@@ -2710,6 +2711,7 @@ private fun ComposerParamsButton(
 private fun ComposerParamsSheet(
     state: ChatUiState,
     modelTitle: String,
+    profileBadge: String?,
     onDismiss: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onOpenProfilePicker: () -> Unit,
@@ -2938,9 +2940,9 @@ private fun ComposerInlineIconButton(
 }
 
 @Composable
-private fun ComposerStatusBadge(text: String, maxWidth: Dp? = null) {
+private fun ModelExecutionBadge(location: ModelExecutionLocation, maxWidth: Dp? = null) {
     Text(
-        text,
+        location.label,
         modifier = Modifier
             .then(if (maxWidth != null) Modifier.widthIn(max = maxWidth) else Modifier)
             .clip(HermexPillShape)
