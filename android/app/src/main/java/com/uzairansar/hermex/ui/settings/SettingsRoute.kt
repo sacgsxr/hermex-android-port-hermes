@@ -1424,6 +1424,7 @@ private fun SettingsDialogs(
             onDismiss = viewModel::dismissDefaultModelPicker,
             onSaveModel = viewModel::saveDefaultModel,
             onSaveCustom = viewModel::saveDefaultModelId,
+            onScan = viewModel::scanForModels,
         )
     }
 
@@ -1567,6 +1568,7 @@ private fun DefaultModelPickerDialog(
     onDismiss: () -> Unit,
     onSaveModel: (com.uzairansar.hermex.core.model.ModelSummary) -> Unit,
     onSaveCustom: (String) -> Unit,
+    onScan: () -> Unit,
 ) {
     var searchText by rememberSaveable(state.showDefaultModelPicker) { mutableStateOf("") }
     var customModel by rememberSaveable(state.showDefaultModelPicker) { mutableStateOf("") }
@@ -1592,6 +1594,12 @@ private fun DefaultModelPickerDialog(
                     singleLine = true,
                     label = { Text(localizedString("Search models")) },
                     enabled = !state.isSavingDefaultModel,
+                )
+                HermexPillButton(
+                    label = if (state.isLoadingLiveModels) "Scanning..." else "Scan / Refresh",
+                    onClick = onScan,
+                    enabled = !state.isLoadingLiveModels && !state.isSavingDefaultModel,
+                    modifier = Modifier.fillMaxWidth().testTag("default_model_scan"),
                 )
                 state.defaultModelPickerError?.let { StatusText(it, isError = true) }
                 OutlinedTextField(
