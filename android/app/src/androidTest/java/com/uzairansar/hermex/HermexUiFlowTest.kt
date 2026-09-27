@@ -719,8 +719,10 @@ class HermexUiFlowTest {
         // The profile pill now lives in the collapsed params sheet.
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("History stays here") }
         composeRule.onNodeWithTag("chat_params_button").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Default") }
-        composeRule.onNodeWithText("Default").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
+        // "Default" appears twice now (Model row badge + Profile row), so click
+        // the profile row by tag rather than by text.
+        composeRule.onNodeWithTag("chat_profile_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Choose Profile") }
         composeRule.onNodeWithText("Review").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Start New Session?") }
@@ -1255,11 +1257,18 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Search models").performTextInput("gpt-4o")
         composeRule.onNodeWithTag("model_picker_list").performScrollToNode(hasSemanticsText("GPT-4o"))
         composeRule.onNodeWithText("GPT-4o").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("GPT-4o") }
+        // The picker closed, and the model name is no longer in the composer
+        // row, so it is only visible in the params sheet now.
+        composeRule.onNodeWithTag("chat_params_button").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("GPT-4o") }
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { !hasText("Parameters") }
         // Profile now lives in the collapsed params sheet, not a strip pill.
         composeRule.onNodeWithTag("chat_params_button").performClick()
-        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") && hasText("Default") }
-        composeRule.onNodeWithText("Default").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
+        // "Default" now appears twice (Model row badge + Profile row), so
+        // target the profile row by tag rather than by text.
+        composeRule.onNodeWithTag("chat_profile_selector").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Review") }
         composeRule.onNodeWithText("Review").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { chatProfileSwitchBody.contains("review") }
@@ -2651,8 +2660,16 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Medium").assertIsDisplayed()
         composeRule.onNodeWithTag("model_provider_openai").performClick()
         // The picker's provider rows still carry execution location, unchanged.
-        composeRule.onNodeWithText("Remote").assertExists()
+        composeRule.onAllNodesWithText("Remote").fetchSemanticsNodes().let { nodes ->
+            assertTrue("expected the picker provider row to keep its location badge", nodes.isNotEmpty())
+        }
         composeRule.onNodeWithText("High").performClick()
+        // Selecting reasoning can return to the composer; the model row lives in
+        // the sheet, so make sure it is open before asserting on it.
+        if (!hasText("Parameters")) {
+            composeRule.onNodeWithTag("chat_params_button").performClick()
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Parameters") }
         composeRule.onNodeWithTag("chat_model_selector").assertIsDisplayed()
         composeRule.onNodeWithText("Very Long Model Name For Large Text").assertIsDisplayed()
     }
