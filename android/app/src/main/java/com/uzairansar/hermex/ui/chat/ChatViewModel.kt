@@ -1625,11 +1625,11 @@ class ChatViewModel internal constructor(
             return
         }
         runCatching {
-            recorder.start {
+            recorder.start(onLimitReached = {
                 viewModelScope.launch {
                     if (_state.value.isRecordingVoiceNote) stopAndSendVoiceNote(recorder)
                 }
-            }
+            })
         }
             .onSuccess {
                 _state.update {
@@ -1666,11 +1666,11 @@ class ChatViewModel internal constructor(
                         response.error ?: "The server did not return a transcript."
                     }
                     if (isPendingNewChat) {
-                        enqueuePendingLocalAttachment(file, "audio/mp4")
+                        enqueuePendingLocalAttachment(file, "audio/wav")
                         retainedForPending = true
                         transcript to null
                     } else {
-                        val upload = repository.upload(sessionId, file, "audio/mp4")
+                        val upload = repository.upload(sessionId, file, "audio/wav")
                         require(upload.error.isNullOrBlank() && !upload.path.isNullOrBlank()) {
                             upload.error ?: "The server did not return the uploaded voice note path."
                         }
