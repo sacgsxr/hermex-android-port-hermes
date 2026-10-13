@@ -446,7 +446,7 @@ class HermesApiClient(
         return executeAndDecode(request)
     }
 
-    suspend fun transcribe(file: File, mimeType: String? = "audio/mp4"): TranscribeResponse {
+    suspend fun transcribe(file: File, mimeType: String? = "audio/wav"): TranscribeResponse {
         val mediaType = (mimeType ?: "application/octet-stream").toMediaType()
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)

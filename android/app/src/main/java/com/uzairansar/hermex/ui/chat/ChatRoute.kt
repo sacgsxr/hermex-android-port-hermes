@@ -539,23 +539,20 @@ fun ChatRoute(
                 ) {
                     DictationProvider.Server -> runCatching {
                         voiceDictationGeneration = captureGeneration
-                        dictationRecorder.start { speechScope.launch { finishServerDictation() } }
+                        val finishWhenEndpointReached: () -> Unit = {
+                            speechScope.launch { finishServerDictation() }
+                        }
+                        dictationRecorder.start(
+                            onLimitReached = finishWhenEndpointReached,
+                            onSilenceLimitReached = if (captureGeneration != null) {
+                                finishWhenEndpointReached
+                            } else {
+                                {}
+                            },
+                            endpointing = captureGeneration?.let { VoiceEndpointingPolicy() },
+                        )
                     }.onSuccess {
                         isVoiceDictating = true
-                        if (captureGeneration != null) {
-                            handsFreeCaptureJob?.cancel()
-                            handsFreeCaptureJob = speechScope.launch {
-                                delay(HANDS_FREE_CAPTURE_WINDOW_MILLIS)
-                                if (
-                                    handsFreeMachine.accepts(captureGeneration) &&
-                                    handsFreeMachine.state.phase == HandsFreePhase.Listening &&
-                                    dictationRecorder.isRecording
-                                ) {
-                                    handsFreeCaptureJob = null
-                                    finishServerDictation()
-                                }
-                            }
-                        }
                     }.onFailure { error ->
                         voiceDictationGeneration = null
                         voiceDictationError = error.message ?: "Could not start server dictation."
@@ -6470,7 +6467,6 @@ private val ChatMessage.markerKind: ChatMarkerKind?
     }
 
 private const val preservedTaskListPrefix = "[your active task list was preserved across context compression]"
-private const val HANDS_FREE_CAPTURE_WINDOW_MILLIS = 8_000L
 private const val HANDS_FREE_RESPONSE_REFRESH_ATTEMPTS = 20
 private const val HANDS_FREE_RESPONSE_REFRESH_DELAY_MILLIS = 250L
 
