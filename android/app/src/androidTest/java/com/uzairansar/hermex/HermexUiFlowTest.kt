@@ -423,7 +423,9 @@ class HermexUiFlowTest {
                 .onNodeWithTag("session_swipe_action_${action}_icon", useUnmergedTree = true)
                 .fetchSemanticsNode()
                 .boundsInRoot
-            assertTrue(icon.width >= circle.width * 0.6f)
+            // Semantics bounds can round by a pixel on API 27; keep a small margin
+            // below the intended 32.dp / 52.dp (0.615) icon-to-circle ratio.
+            assertTrue(icon.width >= circle.width * 0.58f)
             assertTrue(abs(icon.center.x - circle.center.x) <= 1f)
             assertTrue(abs(icon.center.y - circle.center.y) <= 1f)
         }
