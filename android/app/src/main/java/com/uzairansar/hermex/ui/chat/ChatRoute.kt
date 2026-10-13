@@ -844,8 +844,7 @@ fun ChatRoute(
             val requestGeneration = listenPlaybackController.beginLoading(messageId)
             speechJob = speechScope.launch {
                 val audio = when {
-                    localTtsSettings.provider == ReadAloudProvider.LocalKokoro &&
-                        LocalKokoroTtsPolicy.shouldUse(text, localTtsSettings.endpoint, localTtsSettings.voice) ->
+                    localTtsSettings.provider == ReadAloudProvider.LocalKokoro ->
                         runCatching {
                             localKokoroTtsClient.synthesize(
                                 text = text,
