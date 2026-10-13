@@ -406,7 +406,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Add project").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithTag("session_swipe_action_delete").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithTag("session_swipe_action_archive").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithTag("session_row_s1").performTouchInput {
+        composeRule.onNodeWithTag("session_row_s1").performScrollTo().performTouchInput {
             down(center)
             moveBy(Offset(-width * 0.14f, 0f))
             up()
@@ -423,9 +423,7 @@ class HermexUiFlowTest {
                 .onNodeWithTag("session_swipe_action_${action}_icon", useUnmergedTree = true)
                 .fetchSemanticsNode()
                 .boundsInRoot
-            // Semantics bounds can round by a pixel on API 27; keep a small margin
-            // below the intended 32.dp / 52.dp (0.615) icon-to-circle ratio.
-            assertTrue(icon.width >= circle.width * 0.58f)
+            assertTrue(icon.width >= circle.width * 0.6f)
             assertTrue(abs(icon.center.x - circle.center.x) <= 1f)
             assertTrue(abs(icon.center.y - circle.center.y) <= 1f)
         }
