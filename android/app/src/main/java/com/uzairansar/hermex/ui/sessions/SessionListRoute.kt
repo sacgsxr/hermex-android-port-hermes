@@ -187,6 +187,7 @@ fun SessionListRoute(
     var pendingShortcutAction by rememberSaveable(shortcutKey) { mutableStateOf<String?>(null) }
     var expandedActionsFor by rememberSaveable { mutableStateOf<String?>(null) }
     var profilesExpanded by rememberSaveable { mutableStateOf(false) }
+    var botsExpanded by rememberSaveable { mutableStateOf(false) }
     var projectsExpanded by rememberSaveable { mutableStateOf(false) }
     var scheduledSessionsExpanded by rememberSaveable { mutableStateOf(false) }
     var viewingAllScheduledSessions by rememberSaveable { mutableStateOf(false) }
@@ -374,7 +375,18 @@ fun SessionListRoute(
                                 settings = state.mainPageDisplaySettings,
                                 onOpenPanel = onOpenPanel,
                                 onOpenKanban = onOpenKanban,
+                                onOpenBots = { botsExpanded = !botsExpanded },
                             )
+                        }
+                        if (botsExpanded) {
+                            item {
+                                BotModeSection(
+                                    profiles = state.profileOptions,
+                                    isLoading = state.isLoadingProfiles,
+                                    error = state.profileError,
+                                    onOpen = { profile -> onOpenPendingChat(SessionOpenDestination.Chat, profile.name) },
+                                )
+                            }
                         }
                         if (state.mainPageDisplaySettings.showActiveProfile && !state.isSingleProfileMode) {
                             item {
@@ -933,6 +945,7 @@ private fun UtilityRows(
     settings: com.uzairansar.hermex.data.preferences.MainPageDisplaySettings,
     onOpenPanel: (String) -> Unit,
     onOpenKanban: () -> Unit,
+    onOpenBots: () -> Unit,
 ) {
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Column(
@@ -942,6 +955,7 @@ private fun UtilityRows(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         val rows = buildList {
+            add(UtilityDestination(R.string.nav_active_profile, R.drawable.ic_lucide_user_round_cog, onOpenBots))
             if (settings.showTasks) add(UtilityDestination(R.string.nav_tasks, R.drawable.ic_lucide_calendar_clock) { onOpenPanel("tasks") })
             if (settings.showKanban) add(UtilityDestination(R.string.nav_kanban, R.drawable.ic_lucide_columns_3, onOpenKanban))
             if (settings.showSkills) add(UtilityDestination(R.string.nav_skills, R.drawable.ic_lucide_hammer) { onOpenPanel("skills") })
@@ -960,6 +974,38 @@ private fun UtilityRows(
         } else {
             rows.forEach { destination ->
                 UtilityRow(stringResource(destination.label), destination.icon, destination.onOpen)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BotModeSection(
+    profiles: List<ProfileSummary>,
+    isLoading: Boolean,
+    error: String?,
+    onOpen: (ProfileSummary) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(localizedString("Profiles"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            localizedString("Choose profile"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when {
+            isLoading && profiles.isEmpty() -> ProfileStatusRow("Loading bots...")
+            profiles.isEmpty() -> ProfileStatusRow(error ?: "No bot profiles available")
+            else -> profiles.forEach { profile ->
+                ProfileOptionRow(
+                    profile = profile,
+                    selected = false,
+                    enabled = true,
+                    onClick = { onOpen(profile) },
+                )
             }
         }
     }

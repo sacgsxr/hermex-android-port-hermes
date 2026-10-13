@@ -366,6 +366,9 @@ fun ChatRoute(
     val streamNotifier = remember(context) { StreamStatusNotifier(context.applicationContext) }
     val listenPlaybackController = remember(context) { ListenPlaybackController(context) }
     val listenPlaybackState by listenPlaybackController.state.collectAsStateWithLifecycle()
+    val handsFreeMachine = remember { HandsFreeVoiceMachine() }
+    var handsFreeEnabled by rememberSaveable { mutableStateOf(false) }
+    var handsFreeState by remember { mutableStateOf(handsFreeMachine.state) }
     var speechJob by remember { mutableStateOf<Job?>(null) }
     var dictationJob by remember { mutableStateOf<Job?>(null) }
     val speechScope = rememberCoroutineScope()
@@ -457,12 +460,14 @@ fun ChatRoute(
     var isVoiceDictationTranscribing by remember { mutableStateOf(false) }
     var voiceDictationError by rememberSaveable { mutableStateOf<String?>(null) }
     var voiceDictationBaseDraft by rememberSaveable { mutableStateOf("") }
+    var voiceDictationGeneration by remember { mutableStateOf<Long?>(null) }
     lateinit var finishServerDictation: () -> Unit
     finishServerDictation = {
         if (!dictationRecorder.isRecording || isVoiceDictationTranscribing) {
             Unit
         } else {
             val file = dictationRecorder.stop()
+            val captureGeneration = voiceDictationGeneration
             if (file == null) {
                 isVoiceDictating = false
                 voiceDictationError = dictationRecorder.lastErrorMessage ?: "Voice dictation was empty."
@@ -477,6 +482,18 @@ fun ChatRoute(
                             response.error ?: "The server did not return a transcript."
                         }
                         viewModel.updateDraft(voiceDictationDraft(voiceDictationBaseDraft, transcript))
+                        if (
+                            captureGeneration != null &&
+                            handsFreeEnabled &&
+                            handsFreeMachine.accepts(captureGeneration) &&
+                            handsFreeMachine.captureEnded()
+                        ) {
+                            handsFreeState = handsFreeMachine.state
+                            if (handsFreeMachine.transcriptSubmitted()) {
+                                handsFreeState = handsFreeMachine.state
+                                viewModel.send()
+                            }
+                        }
                         voiceDictationError = null
                     } catch (error: CancellationException) {
                         throw error
@@ -486,7 +503,10 @@ fun ChatRoute(
                         runCatching { file.delete() }
                         isVoiceDictationTranscribing = false
                         isVoiceDictating = false
-                        dictationJob = null
+                        if (voiceDictationGeneration == captureGeneration) {
+                            voiceDictationGeneration = null
+                            dictationJob = null
+                        }
                     }
                 }
             }
@@ -498,6 +518,7 @@ fun ChatRoute(
             isVoiceDictating && dictationRecorder.isRecording -> finishServerDictation()
             isVoiceDictating -> dictationController.stop()
             else -> {
+                val captureGeneration = handsFreeState.generation.takeIf { handsFreeEnabled }
                 voiceDictationBaseDraft = state.draft
                 voiceDictationError = null
                 when (
@@ -508,16 +529,31 @@ fun ChatRoute(
                     )
                 ) {
                     DictationProvider.Server -> runCatching {
+                        voiceDictationGeneration = captureGeneration
                         dictationRecorder.start { speechScope.launch { finishServerDictation() } }
                     }.onSuccess {
                         isVoiceDictating = true
                     }.onFailure { error ->
+                        voiceDictationGeneration = null
                         voiceDictationError = error.message ?: "Could not start server dictation."
                     }
                     DictationProvider.OnDevice -> dictationController.start(
                         onDeviceOnly = true,
-                        onText = { transcript, _ ->
+                        onText = { transcript, isFinal ->
                             viewModel.updateDraft(voiceDictationDraft(voiceDictationBaseDraft, transcript))
+                            if (
+                                captureGeneration != null &&
+                                handsFreeEnabled &&
+                                handsFreeMachine.accepts(captureGeneration) &&
+                                isFinal &&
+                                handsFreeMachine.captureEnded()
+                            ) {
+                                handsFreeState = handsFreeMachine.state
+                                if (handsFreeMachine.transcriptSubmitted()) {
+                                    handsFreeState = handsFreeMachine.state
+                                    viewModel.send()
+                                }
+                            }
                         },
                         onListeningChanged = { isVoiceDictating = it },
                         onError = { voiceDictationError = it },
@@ -532,6 +568,7 @@ fun ChatRoute(
         if (dictationRecorder.isRecording) dictationRecorder.stop(delete = true)
         dictationJob?.cancel()
         dictationJob = null
+        voiceDictationGeneration = null
         isVoiceDictating = false
         isVoiceDictationTranscribing = false
         voiceDictationError = null
@@ -851,7 +888,24 @@ fun ChatRoute(
     }
 
     LaunchedEffect(state.responseCompletionTrigger) {
-        if (state.responseCompletionTrigger > 0) viewModel.refreshCompletedTranscriptIfNeeded()
+        if (state.responseCompletionTrigger > 0) {
+            viewModel.refreshCompletedTranscriptIfNeeded()
+            if (handsFreeEnabled && handsFreeMachine.responseCompleted(handsFreeState.generation)) {
+                handsFreeState = handsFreeMachine.state
+                delay(300)
+                state.messages.lastOrNull { it.role.equals("assistant", ignoreCase = true) }
+                    ?.content?.trim()?.takeIf { it.isNotEmpty() }?.let { listenText(null, it) }
+            }
+        }
+    }
+
+    LaunchedEffect(listenPlaybackState.phase, handsFreeEnabled) {
+        if (handsFreeEnabled && listenPlaybackState.phase == ListenPlaybackPhase.Idle && handsFreeState.phase == HandsFreePhase.Speaking) {
+            if (handsFreeMachine.playbackCompleted(handsFreeState.generation)) {
+                handsFreeState = handsFreeMachine.state
+                requestVoiceDictation()
+            }
+        }
     }
 
     LaunchedEffect(viewModel, sessionId, hapticsEnabled) {
@@ -1217,6 +1271,32 @@ fun ChatRoute(
                                     listenPlaybackController.stop()
                                 },
                             )
+                        }
+                        if (handsFreeEnabled) {
+                            TextButton(
+                                onClick = {
+                                    handsFreeEnabled = false
+                                    handsFreeState = handsFreeMachine.stop()
+                                    dictationController.cancel { isVoiceDictating = it }
+                                    dictationRecorder.stop(delete = true)
+                                    dictationJob?.cancel()
+                                    dictationJob = null
+                                    voiceDictationGeneration = null
+                                    isVoiceDictating = false
+                                    isVoiceDictationTranscribing = false
+                                    listenPlaybackController.stop()
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("hands_free_stop"),
+                            ) { Text("Stop hands-free voice (${handsFreeState.phase})") }
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    handsFreeEnabled = true
+                                    handsFreeState = handsFreeMachine.start()
+                                    requestVoiceDictation()
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("hands_free_start"),
+                            ) { Text(localizedString("Listen")) }
                         }
                         ComposerSurface(
                             state = state,
