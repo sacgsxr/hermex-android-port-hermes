@@ -1035,6 +1035,7 @@ private fun ActiveProfileSection(
                 .fillMaxWidth()
                 .clip(HermexCardShape)
                 .clickable(onClick = onToggleExpanded)
+                .testTag("active_profile_toggle")
                 .heightIn(min = 44.dp)
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),

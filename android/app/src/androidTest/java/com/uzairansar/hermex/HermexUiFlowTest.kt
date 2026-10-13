@@ -430,7 +430,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Tasks").performClick()
         assertEquals("tasks", openedPanel)
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Active Profile") }
-        composeRule.onNodeWithText("Active Profile").performClick()
+        composeRule.onNodeWithTag("active_profile_toggle").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Review") }
         composeRule.onNodeWithText("gpt-5").assertIsDisplayed()
         composeRule.onNodeWithText("Default").assertIsSelected()
