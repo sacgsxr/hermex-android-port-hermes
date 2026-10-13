@@ -371,6 +371,7 @@ fun ChatRoute(
     var handsFreeState by remember { mutableStateOf(handsFreeMachine.state) }
     var speechJob by remember { mutableStateOf<Job?>(null) }
     var dictationJob by remember { mutableStateOf<Job?>(null) }
+    var handsFreeCaptureJob by remember { mutableStateOf<Job?>(null) }
     val speechScope = rememberCoroutineScope()
     val modelPickerScope = rememberCoroutineScope()
 
@@ -399,6 +400,8 @@ fun ChatRoute(
             speechJob = null
             dictationJob?.cancel()
             dictationJob = null
+            handsFreeCaptureJob?.cancel()
+            handsFreeCaptureJob = null
             if (recorder.isRecording) viewModel.cancelVoiceNote(recorder)
             dictationRecorder.stop(delete = true)
             dictationController.cancel()
@@ -463,6 +466,8 @@ fun ChatRoute(
     var voiceDictationGeneration by remember { mutableStateOf<Long?>(null) }
     lateinit var finishServerDictation: () -> Unit
     finishServerDictation = {
+        handsFreeCaptureJob?.cancel()
+        handsFreeCaptureJob = null
         if (!dictationRecorder.isRecording || isVoiceDictationTranscribing) {
             Unit
         } else {
@@ -499,6 +504,10 @@ fun ChatRoute(
                         throw error
                     } catch (error: Throwable) {
                         voiceDictationError = error.message ?: "Could not transcribe voice input."
+                        if (captureGeneration != null && handsFreeMachine.accepts(captureGeneration)) {
+                            handsFreeState = handsFreeMachine.stop()
+                            handsFreeEnabled = false
+                        }
                     } finally {
                         runCatching { file.delete() }
                         isVoiceDictationTranscribing = false
@@ -533,9 +542,27 @@ fun ChatRoute(
                         dictationRecorder.start { speechScope.launch { finishServerDictation() } }
                     }.onSuccess {
                         isVoiceDictating = true
+                        if (captureGeneration != null) {
+                            handsFreeCaptureJob?.cancel()
+                            handsFreeCaptureJob = speechScope.launch {
+                                delay(HANDS_FREE_CAPTURE_WINDOW_MILLIS)
+                                if (
+                                    handsFreeMachine.accepts(captureGeneration) &&
+                                    handsFreeMachine.state.phase == HandsFreePhase.Listening &&
+                                    dictationRecorder.isRecording
+                                ) {
+                                    handsFreeCaptureJob = null
+                                    finishServerDictation()
+                                }
+                            }
+                        }
                     }.onFailure { error ->
                         voiceDictationGeneration = null
                         voiceDictationError = error.message ?: "Could not start server dictation."
+                        if (captureGeneration != null) {
+                            handsFreeState = handsFreeMachine.stop()
+                            handsFreeEnabled = false
+                        }
                     }
                     DictationProvider.OnDevice -> dictationController.start(
                         onDeviceOnly = true,
@@ -890,11 +917,26 @@ fun ChatRoute(
     LaunchedEffect(state.responseCompletionTrigger) {
         if (state.responseCompletionTrigger > 0) {
             viewModel.refreshCompletedTranscriptIfNeeded()
-            if (handsFreeEnabled && handsFreeMachine.responseCompleted(handsFreeState.generation)) {
-                handsFreeState = handsFreeMachine.state
-                delay(300)
-                state.messages.lastOrNull { it.role.equals("assistant", ignoreCase = true) }
-                    ?.content?.trim()?.takeIf { it.isNotEmpty() }?.let { listenText(null, it) }
+            if (handsFreeEnabled && handsFreeState.phase == HandsFreePhase.WaitingForResponse) {
+                var attempts = 0
+                while (
+                    viewModel.state.value.responseCompletionNeedsTranscriptRefresh &&
+                    attempts < HANDS_FREE_RESPONSE_REFRESH_ATTEMPTS
+                ) {
+                    delay(HANDS_FREE_RESPONSE_REFRESH_DELAY_MILLIS)
+                    attempts += 1
+                }
+                val responseText = viewModel.state.value.messages
+                    .lastOrNull { it.role.equals("assistant", ignoreCase = true) }
+                    ?.content?.trim().orEmpty()
+                if (responseText.isNotEmpty() && handsFreeMachine.responseCompleted(handsFreeState.generation)) {
+                    handsFreeState = handsFreeMachine.state
+                    listenText(null, responseText)
+                } else if (responseText.isEmpty()) {
+                    voiceDictationError = "The completed response could not be read aloud."
+                    handsFreeState = handsFreeMachine.stop()
+                    handsFreeEnabled = false
+                }
             }
         }
     }
@@ -1277,6 +1319,8 @@ fun ChatRoute(
                                 onClick = {
                                     handsFreeEnabled = false
                                     handsFreeState = handsFreeMachine.stop()
+                                    handsFreeCaptureJob?.cancel()
+                                    handsFreeCaptureJob = null
                                     dictationController.cancel { isVoiceDictating = it }
                                     dictationRecorder.stop(delete = true)
                                     dictationJob?.cancel()
@@ -6426,6 +6470,9 @@ private val ChatMessage.markerKind: ChatMarkerKind?
     }
 
 private const val preservedTaskListPrefix = "[your active task list was preserved across context compression]"
+private const val HANDS_FREE_CAPTURE_WINDOW_MILLIS = 8_000L
+private const val HANDS_FREE_RESPONSE_REFRESH_ATTEMPTS = 20
+private const val HANDS_FREE_RESPONSE_REFRESH_DELAY_MILLIS = 250L
 
 private fun isContextCompactionText(text: String?): Boolean {
     val trimmed = text.orEmpty().trim()
