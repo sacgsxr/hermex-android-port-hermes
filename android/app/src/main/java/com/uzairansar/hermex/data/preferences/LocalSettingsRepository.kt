@@ -51,7 +51,7 @@ enum class ReadAloudProvider(val storageValue: String, val settingsDescription: 
 
 data class LocalTtsSettings(
     val provider: ReadAloudProvider = ReadAloudProvider.Server,
-    val endpoint: String = "http://127.0.0.1:8765/v1",
+    val endpoint: String = "https://llm.tailb064be.ts.net/kokoro/v1",
     val voice: String = "af_heart",
     val speed: Float = 1.0f,
 )
@@ -129,7 +129,7 @@ class LocalSettingsRepository(context: Context) {
     val localTtsSettings: Flow<LocalTtsSettings> = dataStore.data.map { preferences ->
         LocalTtsSettings(
             provider = ReadAloudProvider.fromStorageValue(preferences[READ_ALOUD_PROVIDER]),
-            endpoint = preferences[LOCAL_TTS_ENDPOINT] ?: "http://127.0.0.1:8765/v1",
+            endpoint = preferences[LOCAL_TTS_ENDPOINT] ?: "https://llm.tailb064be.ts.net/kokoro/v1",
             voice = preferences[LOCAL_TTS_VOICE] ?: "af_heart",
             speed = (preferences[LOCAL_TTS_SPEED] ?: 1.0f).coerceIn(0.25f, 4.0f),
         )
