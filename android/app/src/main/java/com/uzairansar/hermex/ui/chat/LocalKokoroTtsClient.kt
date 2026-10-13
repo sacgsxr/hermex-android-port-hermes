@@ -75,7 +75,7 @@ internal class LocalKokoroTtsClient(
                     .build(),
             ).execute().use { response ->
                 check(response.isSuccessful) { "Local Kokoro returned HTTP ${response.code}." }
-                val bytes = response.body?.bytes().orEmpty()
+                val bytes = response.body?.bytes() ?: ByteArray(0)
                 check(bytes.isNotEmpty()) { "Local Kokoro returned empty audio." }
                 bytes
             }
