@@ -21,7 +21,7 @@ class VoiceEndpointingPolicyTest {
         assertTrue(policy.hasSpeech)
         assertEquals(VoiceEndpointDecision.Continue, policy.update(0.001f, 200L))
         assertEquals(VoiceEndpointDecision.Continue, policy.update(0.001f, 399L))
-        assertEquals(VoiceEndpointDecision.TrailingSilence, policy.update(0.001f, 400L))
+        assertEquals(VoiceEndpointDecision.TrailingSilence, policy.update(0.001f, 500L))
     }
 
     @Test
@@ -31,7 +31,7 @@ class VoiceEndpointingPolicyTest {
         policy.update(0.001f, 250L)
         policy.update(0.2f, 350L)
         assertEquals(VoiceEndpointDecision.Continue, policy.update(0.001f, 600L))
-        assertEquals(VoiceEndpointDecision.TrailingSilence, policy.update(0.001f, 650L))
+        assertEquals(VoiceEndpointDecision.TrailingSilence, policy.update(0.001f, 900L))
     }
 
     @Test
