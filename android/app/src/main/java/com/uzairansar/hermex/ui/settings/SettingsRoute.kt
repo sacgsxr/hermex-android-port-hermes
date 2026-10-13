@@ -745,7 +745,7 @@ private fun LocalKokoroSettingsCard(
 ) {
     SettingsSection(title = "Read Aloud") {
         SettingsPickerRow(
-            label = "Read-aloud engine",
+            label = localizedString("Read-aloud engine"),
             value = settings.provider.settingsDescription,
             iconRes = com.uzairansar.hermex.R.drawable.ic_hermex_mic,
             onClick = {
@@ -764,7 +764,7 @@ private fun LocalKokoroSettingsCard(
                 value = settings.endpoint,
                 onValueChange = { onSettingsChanged(settings.copy(endpoint = it)) },
                 modifier = Modifier.fillMaxWidth().testTag("local_tts_endpoint"),
-                label = { Text("Kokoro OpenAI-compatible URL") },
+                label = { Text(localizedString("Kokoro OpenAI-compatible URL")) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
@@ -772,14 +772,14 @@ private fun LocalKokoroSettingsCard(
                 value = settings.voice,
                 onValueChange = { onSettingsChanged(settings.copy(voice = it)) },
                 modifier = Modifier.fillMaxWidth().testTag("local_tts_voice"),
-                label = { Text("Voice") },
+                label = { Text(localizedString("Voice")) },
                 singleLine = true,
             )
             OutlinedTextField(
                 value = settings.speed.toString(),
                 onValueChange = { value -> value.toFloatOrNull()?.let { onSettingsChanged(settings.copy(speed = it)) } },
                 modifier = Modifier.fillMaxWidth().testTag("local_tts_speed"),
-                label = { Text("Speed (0.25–4.0)") },
+                label = { Text(localizedString("Speed (0.25–4.0)")) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )
