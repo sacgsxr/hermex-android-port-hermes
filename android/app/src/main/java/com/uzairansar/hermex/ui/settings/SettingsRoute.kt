@@ -891,7 +891,10 @@ private fun ServerAccountRow(
         }
         Spacer(Modifier.height(8.dp))
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .testTag("server_account_actions"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HermexPillButton(localizedString("Edit Identity"), onEditIdentity)

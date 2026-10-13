@@ -95,7 +95,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           working-directory: android
-          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class='com.uzairansar.hermex.HermexUiFlowTest#chatPendingPromptsStayBetweenTopBarAndComposer,com.uzairansar.hermex.HermexUiFlowTest#chatRouteKeepsUserPositionWhenStreamUpdatesAfterUpwardDrag'
+          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class='com.uzairansar.hermex.HermexUiFlowTest#settingsRouteCoversIdentityServersCacheAppearanceAndAbout,com.uzairansar.hermex.HermexUiFlowTest#chatPendingPromptsStayBetweenTopBarAndComposer,com.uzairansar.hermex.HermexUiFlowTest#chatRouteKeepsUserPositionWhenStreamUpdatesAfterUpwardDrag'
 
       - name: Run focused API 36 connected-device tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
