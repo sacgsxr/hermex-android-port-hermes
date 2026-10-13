@@ -171,6 +171,8 @@ import com.uzairansar.hermex.core.model.shouldRenderTranscriptItem
 import com.uzairansar.hermex.data.preferences.ChatDisplaySettings
 import com.uzairansar.hermex.data.preferences.DictationProviderPreference
 import com.uzairansar.hermex.data.preferences.LocalSettingsRepository
+import com.uzairansar.hermex.data.preferences.LocalTtsSettings
+import com.uzairansar.hermex.data.preferences.ReadAloudProvider
 import com.uzairansar.hermex.data.preferences.normalizeTranscriptTextScale
 import com.uzairansar.hermex.data.preferences.ModelFavoriteKey
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
@@ -319,6 +321,9 @@ fun ChatRoute(
     val dictationProviderPreference by remember(localSettingsRepository) {
         localSettingsRepository?.dictationProviderPreference ?: flowOf(DictationProviderPreference.ServerFirst)
     }.collectAsStateWithLifecycle(initialValue = DictationProviderPreference.ServerFirst)
+    val localTtsSettings by remember(localSettingsRepository) {
+        localSettingsRepository?.localTtsSettings ?: flowOf(LocalTtsSettings())
+    }.collectAsStateWithLifecycle(initialValue = LocalTtsSettings())
     val tintPrimaryActionsWithThemeColor by remember(localSettingsRepository) {
         localSettingsRepository?.tintPrimaryActionsWithThemeColor ?: flowOf(false)
     }.collectAsStateWithLifecycle(initialValue = false)
@@ -365,6 +370,7 @@ fun ChatRoute(
     val dictationController = remember(context) { VoiceDictationController(context) }
     val streamNotifier = remember(context) { StreamStatusNotifier(context.applicationContext) }
     val listenPlaybackController = remember(context) { ListenPlaybackController(context) }
+    val localKokoroTtsClient = remember { LocalKokoroTtsClient() }
     val listenPlaybackState by listenPlaybackController.state.collectAsStateWithLifecycle()
     val handsFreeMachine = remember { HandsFreeVoiceMachine() }
     var handsFreeEnabled by rememberSaveable { mutableStateOf(false) }
@@ -837,10 +843,19 @@ fun ChatRoute(
         } else {
             val requestGeneration = listenPlaybackController.beginLoading(messageId)
             speechJob = speechScope.launch {
-                val audio = if (ServerTtsPolicy.shouldUseServer(text)) {
-                    viewModel.synthesizeSpeech(text)
-                } else {
-                    null
+                val audio = when {
+                    localTtsSettings.provider == ReadAloudProvider.LocalKokoro &&
+                        LocalKokoroTtsPolicy.shouldUse(text, localTtsSettings.endpoint, localTtsSettings.voice) ->
+                        runCatching {
+                            localKokoroTtsClient.synthesize(
+                                text = text,
+                                endpoint = localTtsSettings.endpoint,
+                                voice = localTtsSettings.voice,
+                                speed = localTtsSettings.speed,
+                            )
+                        }.getOrNull()
+                    ServerTtsPolicy.shouldUseServer(text) -> viewModel.synthesizeSpeech(text)
+                    else -> null
                 }
                 if (!isActive || !listenPlaybackController.isCurrent(requestGeneration, messageId)) {
                     return@launch
