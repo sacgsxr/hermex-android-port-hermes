@@ -2364,6 +2364,7 @@ class HermexUiFlowTest {
         }
         composeRule.onNodeWithTag("settings_list").performScrollToNode(hasSemanticsText("SERVERS"))
         composeRule.onNodeWithText("SERVERS").assertIsDisplayed()
+        composeRule.onNodeWithTag("server_account_actions").performScrollTo()
         composeRule.onNodeWithTag("server_account_actions").performScrollToNode(hasSemanticsText("Headers (0)"))
         composeRule.onNodeWithText("Headers (0)").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Name: Value").performTextInput("CF-Access-Client-Id: id")
