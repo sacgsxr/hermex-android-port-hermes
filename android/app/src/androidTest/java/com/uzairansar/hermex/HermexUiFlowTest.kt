@@ -406,7 +406,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithContentDescription("Add project").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithTag("session_swipe_action_delete").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithTag("session_swipe_action_archive").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithTag("session_row_s1").performTouchInput {
+        composeRule.onNodeWithTag("session_row_s1").performScrollTo().performTouchInput {
             down(center)
             moveBy(Offset(-width * 0.14f, 0f))
             up()
@@ -430,7 +430,7 @@ class HermexUiFlowTest {
         composeRule.onNodeWithText("Tasks").performClick()
         assertEquals("tasks", openedPanel)
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Active Profile") }
-        composeRule.onNodeWithText("Active Profile").performClick()
+        composeRule.onNodeWithTag("active_profile_toggle").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Review") }
         composeRule.onNodeWithText("gpt-5").assertIsDisplayed()
         composeRule.onNodeWithText("Default").assertIsSelected()
@@ -2364,15 +2364,16 @@ class HermexUiFlowTest {
         }
         composeRule.onNodeWithTag("settings_list").performScrollToNode(hasSemanticsText("SERVERS"))
         composeRule.onNodeWithText("SERVERS").assertIsDisplayed()
-        composeRule.onNodeWithText("Headers (0)").assertIsDisplayed()
-        composeRule.onNodeWithText("Clear Cache").assertIsDisplayed()
-        composeRule.onNodeWithText("Forget").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Headers (0)").performClick()
+        composeRule.onNodeWithTag("server_account_actions").performScrollTo()
+        composeRule.onNodeWithTag("server_account_actions").performScrollToNode(hasSemanticsText("Headers (0)"))
+        composeRule.onNodeWithText("Headers (0)").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Name: Value").performTextInput("CF-Access-Client-Id: id")
         composeRule.onNodeWithText("Save").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Headers (1)") }
+        composeRule.onNodeWithTag("server_account_actions").performScrollToNode(hasSemanticsText("Headers (1)"))
         composeRule.onNodeWithText("Headers (1)").assertIsDisplayed()
-        composeRule.onNodeWithText("Edit Identity").performClick()
+        composeRule.onNodeWithTag("server_account_actions").performScrollToNode(hasSemanticsText("Edit Identity"))
+        composeRule.onNodeWithText("Edit Identity").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("server_identity_display_name").performTextClearance()
         composeRule.onNodeWithTag("server_identity_display_name").performTextInput("Mobile Lab")
         composeRule.onNodeWithTag("server_identity_initials").performTextClearance()

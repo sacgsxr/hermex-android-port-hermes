@@ -942,31 +942,31 @@ private fun UtilityRows(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         val rows = buildList {
-            if (settings.showTasks) add(UtilityDestination(R.string.nav_tasks, R.drawable.ic_lucide_calendar_clock) { onOpenPanel("tasks") })
-            if (settings.showKanban) add(UtilityDestination(R.string.nav_kanban, R.drawable.ic_lucide_columns_3, onOpenKanban))
-            if (settings.showSkills) add(UtilityDestination(R.string.nav_skills, R.drawable.ic_lucide_hammer) { onOpenPanel("skills") })
-            if (settings.showMemory) add(UtilityDestination(R.string.nav_memory, R.drawable.ic_lucide_brain) { onOpenPanel("memory") })
-            if (settings.showInsights) add(UtilityDestination(R.string.nav_insights, R.drawable.ic_lucide_chart_column_increasing) { onOpenPanel("insights") })
+            if (settings.showTasks) add(UtilityDestination(stringResource(R.string.nav_tasks), R.drawable.ic_lucide_calendar_clock) { onOpenPanel("tasks") })
+            if (settings.showKanban) add(UtilityDestination(stringResource(R.string.nav_kanban), R.drawable.ic_lucide_columns_3, onOpenKanban))
+            if (settings.showSkills) add(UtilityDestination(stringResource(R.string.nav_skills), R.drawable.ic_lucide_hammer) { onOpenPanel("skills") })
+            if (settings.showMemory) add(UtilityDestination(stringResource(R.string.nav_memory), R.drawable.ic_lucide_brain) { onOpenPanel("memory") })
+            if (settings.showInsights) add(UtilityDestination(stringResource(R.string.nav_insights), R.drawable.ic_lucide_chart_column_increasing) { onOpenPanel("insights") })
         }
         if (isLandscape) {
             rows.chunked(2).forEach { pair ->
                 Row(Modifier.fillMaxWidth()) {
                     pair.forEach { destination ->
-                        UtilityRow(stringResource(destination.label), destination.icon, destination.onOpen, Modifier.weight(1f))
+                        UtilityRow(destination.label, destination.icon, destination.onOpen, Modifier.weight(1f))
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         } else {
             rows.forEach { destination ->
-                UtilityRow(stringResource(destination.label), destination.icon, destination.onOpen)
+                UtilityRow(destination.label, destination.icon, destination.onOpen)
             }
         }
     }
 }
 
 private data class UtilityDestination(
-    @param:androidx.annotation.StringRes val label: Int,
+    val label: String,
     @param:DrawableRes val icon: Int,
     val onOpen: () -> Unit,
 )
@@ -989,6 +989,7 @@ private fun ActiveProfileSection(
                 .fillMaxWidth()
                 .clip(HermexCardShape)
                 .clickable(onClick = onToggleExpanded)
+                .testTag("active_profile_toggle")
                 .heightIn(min = 44.dp)
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),

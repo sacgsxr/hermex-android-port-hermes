@@ -38,6 +38,24 @@ enum class DictationProviderPreference(val storageValue: String, val settingsDes
     }
 }
 
+enum class ReadAloudProvider(val storageValue: String, val settingsDescription: String) {
+    Server("server", "Hermes server"),
+    LocalKokoro("localKokoro", "Local Kokoro"),
+    ;
+
+    companion object {
+        fun fromStorageValue(value: String?): ReadAloudProvider =
+            entries.firstOrNull { it.storageValue == value } ?: Server
+    }
+}
+
+data class LocalTtsSettings(
+    val provider: ReadAloudProvider = ReadAloudProvider.Server,
+    val endpoint: String = "https://llm.tailb064be.ts.net/kokoro/v1",
+    val voice: String = "af_heart",
+    val speed: Float = 1.0f,
+)
+
 data class ChatDisplaySettings(
     val showThinkingAndToolCards: Boolean = true,
     val thinkingCardsStartExpanded: Boolean = false,
@@ -106,6 +124,15 @@ class LocalSettingsRepository(context: Context) {
 
     val dictationProviderPreference: Flow<DictationProviderPreference> = dataStore.data.map { preferences ->
         DictationProviderPreference.fromStorageValue(preferences[DICTATION_PROVIDER_PREFERENCE])
+    }
+
+    val localTtsSettings: Flow<LocalTtsSettings> = dataStore.data.map { preferences ->
+        LocalTtsSettings(
+            provider = ReadAloudProvider.fromStorageValue(preferences[READ_ALOUD_PROVIDER]),
+            endpoint = preferences[LOCAL_TTS_ENDPOINT] ?: "https://llm.tailb064be.ts.net/kokoro/v1",
+            voice = preferences[LOCAL_TTS_VOICE] ?: "af_heart",
+            speed = (preferences[LOCAL_TTS_SPEED] ?: 1.0f).coerceIn(0.25f, 4.0f),
+        )
     }
 
     val tintPrimaryActionsWithThemeColor: Flow<Boolean> = dataStore.data.map { preferences ->
@@ -270,6 +297,15 @@ class LocalSettingsRepository(context: Context) {
     suspend fun setDictationProviderPreference(preference: DictationProviderPreference) {
         dataStore.edit { preferences ->
             preferences[DICTATION_PROVIDER_PREFERENCE] = preference.storageValue
+        }
+    }
+
+    suspend fun setLocalTtsSettings(settings: LocalTtsSettings) {
+        dataStore.edit { preferences ->
+            preferences[READ_ALOUD_PROVIDER] = settings.provider.storageValue
+            preferences[LOCAL_TTS_ENDPOINT] = settings.endpoint.trim().take(512)
+            preferences[LOCAL_TTS_VOICE] = settings.voice.trim().take(128)
+            preferences[LOCAL_TTS_SPEED] = settings.speed.coerceIn(0.25f, 4.0f)
         }
     }
 
@@ -517,6 +553,10 @@ class LocalSettingsRepository(context: Context) {
         val FAVORITE_MODEL_KEYS = stringPreferencesKey("chatComposer.favoriteModels")
         val RECENT_MODEL_KEYS = stringPreferencesKey("chatComposer.recentModels")
         val LAST_MODEL_SELECTIONS = stringPreferencesKey("chatComposer.lastModelSelections")
+        val READ_ALOUD_PROVIDER = stringPreferencesKey("readAloud.provider")
+        val LOCAL_TTS_ENDPOINT = stringPreferencesKey("readAloud.localTts.endpoint")
+        val LOCAL_TTS_VOICE = stringPreferencesKey("readAloud.localTts.voice")
+        val LOCAL_TTS_SPEED = floatPreferencesKey("readAloud.localTts.speed")
 
         fun showCliSessionsKey(serverId: String) = booleanPreferencesKey("show_cli_sessions::$serverId")
 

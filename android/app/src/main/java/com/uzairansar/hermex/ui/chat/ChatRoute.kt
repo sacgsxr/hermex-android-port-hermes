@@ -171,6 +171,8 @@ import com.uzairansar.hermex.core.model.shouldRenderTranscriptItem
 import com.uzairansar.hermex.data.preferences.ChatDisplaySettings
 import com.uzairansar.hermex.data.preferences.DictationProviderPreference
 import com.uzairansar.hermex.data.preferences.LocalSettingsRepository
+import com.uzairansar.hermex.data.preferences.LocalTtsSettings
+import com.uzairansar.hermex.data.preferences.ReadAloudProvider
 import com.uzairansar.hermex.data.preferences.normalizeTranscriptTextScale
 import com.uzairansar.hermex.data.preferences.ModelFavoriteKey
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
@@ -319,6 +321,9 @@ fun ChatRoute(
     val dictationProviderPreference by remember(localSettingsRepository) {
         localSettingsRepository?.dictationProviderPreference ?: flowOf(DictationProviderPreference.ServerFirst)
     }.collectAsStateWithLifecycle(initialValue = DictationProviderPreference.ServerFirst)
+    val localTtsSettings by remember(localSettingsRepository) {
+        localSettingsRepository?.localTtsSettings ?: flowOf(LocalTtsSettings())
+    }.collectAsStateWithLifecycle(initialValue = LocalTtsSettings())
     val tintPrimaryActionsWithThemeColor by remember(localSettingsRepository) {
         localSettingsRepository?.tintPrimaryActionsWithThemeColor ?: flowOf(false)
     }.collectAsStateWithLifecycle(initialValue = false)
@@ -365,9 +370,14 @@ fun ChatRoute(
     val dictationController = remember(context) { VoiceDictationController(context) }
     val streamNotifier = remember(context) { StreamStatusNotifier(context.applicationContext) }
     val listenPlaybackController = remember(context) { ListenPlaybackController(context) }
+    val localKokoroTtsClient = remember { LocalKokoroTtsClient() }
     val listenPlaybackState by listenPlaybackController.state.collectAsStateWithLifecycle()
+    val handsFreeMachine = remember { HandsFreeVoiceMachine() }
+    var handsFreeEnabled by rememberSaveable { mutableStateOf(false) }
+    var handsFreeState by remember { mutableStateOf(handsFreeMachine.state) }
     var speechJob by remember { mutableStateOf<Job?>(null) }
     var dictationJob by remember { mutableStateOf<Job?>(null) }
+    var handsFreeCaptureJob by remember { mutableStateOf<Job?>(null) }
     val speechScope = rememberCoroutineScope()
     val modelPickerScope = rememberCoroutineScope()
 
@@ -396,6 +406,8 @@ fun ChatRoute(
             speechJob = null
             dictationJob?.cancel()
             dictationJob = null
+            handsFreeCaptureJob?.cancel()
+            handsFreeCaptureJob = null
             if (recorder.isRecording) viewModel.cancelVoiceNote(recorder)
             dictationRecorder.stop(delete = true)
             dictationController.cancel()
@@ -457,12 +469,16 @@ fun ChatRoute(
     var isVoiceDictationTranscribing by remember { mutableStateOf(false) }
     var voiceDictationError by rememberSaveable { mutableStateOf<String?>(null) }
     var voiceDictationBaseDraft by rememberSaveable { mutableStateOf("") }
+    var voiceDictationGeneration by remember { mutableStateOf<Long?>(null) }
     lateinit var finishServerDictation: () -> Unit
     finishServerDictation = {
+        handsFreeCaptureJob?.cancel()
+        handsFreeCaptureJob = null
         if (!dictationRecorder.isRecording || isVoiceDictationTranscribing) {
             Unit
         } else {
             val file = dictationRecorder.stop()
+            val captureGeneration = voiceDictationGeneration
             if (file == null) {
                 isVoiceDictating = false
                 voiceDictationError = dictationRecorder.lastErrorMessage ?: "Voice dictation was empty."
@@ -477,16 +493,35 @@ fun ChatRoute(
                             response.error ?: "The server did not return a transcript."
                         }
                         viewModel.updateDraft(voiceDictationDraft(voiceDictationBaseDraft, transcript))
+                        if (
+                            captureGeneration != null &&
+                            handsFreeEnabled &&
+                            handsFreeMachine.accepts(captureGeneration) &&
+                            handsFreeMachine.captureEnded()
+                        ) {
+                            handsFreeState = handsFreeMachine.state
+                            if (handsFreeMachine.transcriptSubmitted()) {
+                                handsFreeState = handsFreeMachine.state
+                                viewModel.send()
+                            }
+                        }
                         voiceDictationError = null
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Throwable) {
                         voiceDictationError = error.message ?: "Could not transcribe voice input."
+                        if (captureGeneration != null && handsFreeMachine.accepts(captureGeneration)) {
+                            handsFreeState = handsFreeMachine.stop()
+                            handsFreeEnabled = false
+                        }
                     } finally {
                         runCatching { file.delete() }
                         isVoiceDictationTranscribing = false
                         isVoiceDictating = false
-                        dictationJob = null
+                        if (voiceDictationGeneration == captureGeneration) {
+                            voiceDictationGeneration = null
+                            dictationJob = null
+                        }
                     }
                 }
             }
@@ -498,6 +533,7 @@ fun ChatRoute(
             isVoiceDictating && dictationRecorder.isRecording -> finishServerDictation()
             isVoiceDictating -> dictationController.stop()
             else -> {
+                val captureGeneration = handsFreeState.generation.takeIf { handsFreeEnabled }
                 voiceDictationBaseDraft = state.draft
                 voiceDictationError = null
                 when (
@@ -508,16 +544,46 @@ fun ChatRoute(
                     )
                 ) {
                     DictationProvider.Server -> runCatching {
-                        dictationRecorder.start { speechScope.launch { finishServerDictation() } }
+                        voiceDictationGeneration = captureGeneration
+                        val finishWhenEndpointReached: () -> Unit = {
+                            speechScope.launch { finishServerDictation() }
+                        }
+                        dictationRecorder.start(
+                            onLimitReached = finishWhenEndpointReached,
+                            onSilenceLimitReached = if (captureGeneration != null) {
+                                finishWhenEndpointReached
+                            } else {
+                                {}
+                            },
+                            endpointing = captureGeneration?.let { VoiceEndpointingPolicy() },
+                        )
                     }.onSuccess {
                         isVoiceDictating = true
                     }.onFailure { error ->
+                        voiceDictationGeneration = null
                         voiceDictationError = error.message ?: "Could not start server dictation."
+                        if (captureGeneration != null) {
+                            handsFreeState = handsFreeMachine.stop()
+                            handsFreeEnabled = false
+                        }
                     }
                     DictationProvider.OnDevice -> dictationController.start(
                         onDeviceOnly = true,
-                        onText = { transcript, _ ->
+                        onText = { transcript, isFinal ->
                             viewModel.updateDraft(voiceDictationDraft(voiceDictationBaseDraft, transcript))
+                            if (
+                                captureGeneration != null &&
+                                handsFreeEnabled &&
+                                handsFreeMachine.accepts(captureGeneration) &&
+                                isFinal &&
+                                handsFreeMachine.captureEnded()
+                            ) {
+                                handsFreeState = handsFreeMachine.state
+                                if (handsFreeMachine.transcriptSubmitted()) {
+                                    handsFreeState = handsFreeMachine.state
+                                    viewModel.send()
+                                }
+                            }
                         },
                         onListeningChanged = { isVoiceDictating = it },
                         onError = { voiceDictationError = it },
@@ -532,6 +598,7 @@ fun ChatRoute(
         if (dictationRecorder.isRecording) dictationRecorder.stop(delete = true)
         dictationJob?.cancel()
         dictationJob = null
+        voiceDictationGeneration = null
         isVoiceDictating = false
         isVoiceDictationTranscribing = false
         voiceDictationError = null
@@ -776,10 +843,18 @@ fun ChatRoute(
         } else {
             val requestGeneration = listenPlaybackController.beginLoading(messageId)
             speechJob = speechScope.launch {
-                val audio = if (ServerTtsPolicy.shouldUseServer(text)) {
-                    viewModel.synthesizeSpeech(text)
-                } else {
-                    null
+                val audio = when {
+                    localTtsSettings.provider == ReadAloudProvider.LocalKokoro ->
+                        runCatching {
+                            localKokoroTtsClient.synthesize(
+                                text = text,
+                                endpoint = localTtsSettings.endpoint,
+                                voice = localTtsSettings.voice,
+                                speed = localTtsSettings.speed,
+                            )
+                        }.getOrNull()
+                    ServerTtsPolicy.shouldUseServer(text) -> viewModel.synthesizeSpeech(text)
+                    else -> null
                 }
                 if (!isActive || !listenPlaybackController.isCurrent(requestGeneration, messageId)) {
                     return@launch
@@ -851,7 +926,39 @@ fun ChatRoute(
     }
 
     LaunchedEffect(state.responseCompletionTrigger) {
-        if (state.responseCompletionTrigger > 0) viewModel.refreshCompletedTranscriptIfNeeded()
+        if (state.responseCompletionTrigger > 0) {
+            viewModel.refreshCompletedTranscriptIfNeeded()
+            if (handsFreeEnabled && handsFreeState.phase == HandsFreePhase.WaitingForResponse) {
+                var attempts = 0
+                while (
+                    viewModel.state.value.responseCompletionNeedsTranscriptRefresh &&
+                    attempts < HANDS_FREE_RESPONSE_REFRESH_ATTEMPTS
+                ) {
+                    delay(HANDS_FREE_RESPONSE_REFRESH_DELAY_MILLIS)
+                    attempts += 1
+                }
+                val responseText = viewModel.state.value.messages
+                    .lastOrNull { it.role.equals("assistant", ignoreCase = true) }
+                    ?.content?.trim().orEmpty()
+                if (responseText.isNotEmpty() && handsFreeMachine.responseCompleted(handsFreeState.generation)) {
+                    handsFreeState = handsFreeMachine.state
+                    listenText(null, responseText)
+                } else if (responseText.isEmpty()) {
+                    voiceDictationError = "The completed response could not be read aloud."
+                    handsFreeState = handsFreeMachine.stop()
+                    handsFreeEnabled = false
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(listenPlaybackState.phase, handsFreeEnabled) {
+        if (handsFreeEnabled && listenPlaybackState.phase == ListenPlaybackPhase.Idle && handsFreeState.phase == HandsFreePhase.Speaking) {
+            if (handsFreeMachine.playbackCompleted(handsFreeState.generation)) {
+                handsFreeState = handsFreeMachine.state
+                requestVoiceDictation()
+            }
+        }
     }
 
     LaunchedEffect(viewModel, sessionId, hapticsEnabled) {
@@ -1217,6 +1324,34 @@ fun ChatRoute(
                                     listenPlaybackController.stop()
                                 },
                             )
+                        }
+                        if (handsFreeEnabled) {
+                            TextButton(
+                                onClick = {
+                                    handsFreeEnabled = false
+                                    handsFreeState = handsFreeMachine.stop()
+                                    handsFreeCaptureJob?.cancel()
+                                    handsFreeCaptureJob = null
+                                    dictationController.cancel { isVoiceDictating = it }
+                                    dictationRecorder.stop(delete = true)
+                                    dictationJob?.cancel()
+                                    dictationJob = null
+                                    voiceDictationGeneration = null
+                                    isVoiceDictating = false
+                                    isVoiceDictationTranscribing = false
+                                    listenPlaybackController.stop()
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("hands_free_stop"),
+                            ) { Text("Stop hands-free voice (${handsFreeState.phase})") }
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    handsFreeEnabled = true
+                                    handsFreeState = handsFreeMachine.start()
+                                    requestVoiceDictation()
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("hands_free_start"),
+                            ) { Text(localizedString("Listen")) }
                         }
                         ComposerSurface(
                             state = state,
@@ -6346,6 +6481,8 @@ private val ChatMessage.markerKind: ChatMarkerKind?
     }
 
 private const val preservedTaskListPrefix = "[your active task list was preserved across context compression]"
+private const val HANDS_FREE_RESPONSE_REFRESH_ATTEMPTS = 20
+private const val HANDS_FREE_RESPONSE_REFRESH_DELAY_MILLIS = 250L
 
 private fun isContextCompactionText(text: String?): Boolean {
     val trimmed = text.orEmpty().trim()

@@ -53,6 +53,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +95,8 @@ import com.uzairansar.hermex.data.preferences.normalizedProvider
 import com.uzairansar.hermex.data.preferences.AppThemeMode
 import com.uzairansar.hermex.data.preferences.DictationProviderPreference
 import com.uzairansar.hermex.data.preferences.LocalSettingsRepository
+import com.uzairansar.hermex.data.preferences.LocalTtsSettings
+import com.uzairansar.hermex.data.preferences.ReadAloudProvider
 import com.uzairansar.hermex.data.preferences.StreamingSendBehavior
 import com.uzairansar.hermex.data.repository.AuthRepository
 import com.uzairansar.hermex.data.repository.AuthState
@@ -112,9 +115,11 @@ import com.uzairansar.hermex.ui.theme.hermexColorFromHex
 import com.uzairansar.hermex.ui.theme.hermexGlass
 import com.uzairansar.hermex.ui.notifications.AndroidNotificationPermissionPolicy
 import com.uzairansar.hermex.ui.chat.StreamStatusNotifier
+import com.uzairansar.hermex.ui.chat.LocalKokoroTtsClient
 import com.uzairansar.hermex.ui.localization.localizedString
 import com.uzairansar.hermex.ui.SecureContentEffect
 import com.uzairansar.hermex.ui.localization.localizedStringFormat
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsRoute(
@@ -166,6 +171,11 @@ fun SettingsRoute(
         viewModel.handleResponseCompletionNotificationPermissionResult(granted)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val localTtsSettings by localSettingsRepository.localTtsSettings.collectAsStateWithLifecycle(initialValue = LocalTtsSettings())
+    val settingsScope = rememberCoroutineScope()
+    val localTtsClient = remember { LocalKokoroTtsClient() }
+    var localTtsTestMessage by remember { mutableStateOf<String?>(null) }
+    var localTtsTestRunning by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -347,6 +357,30 @@ fun SettingsRoute(
                     )
                     SettingsFootnote("On-device only keeps composer dictation audio off your Hermes server.")
                 }
+            }
+            item {
+                LocalKokoroSettingsCard(
+                    settings = localTtsSettings,
+                    testMessage = localTtsTestMessage,
+                    testRunning = localTtsTestRunning,
+                    onSettingsChanged = { settings ->
+                        settingsScope.launch { localSettingsRepository.setLocalTtsSettings(settings) }
+                    },
+                    onTest = {
+                        localTtsTestRunning = true
+                        localTtsTestMessage = null
+                        settingsScope.launch {
+                            runCatching {
+                                localTtsClient.test(localTtsSettings.endpoint, localTtsSettings.voice, localTtsSettings.speed)
+                            }.onSuccess { bytes ->
+                                localTtsTestMessage = "Kokoro returned ${bytes.size} audio bytes."
+                            }.onFailure { error ->
+                                localTtsTestMessage = error.message ?: "Local Kokoro test failed."
+                            }
+                            localTtsTestRunning = false
+                        }
+                    },
+                )
             }
             item {
                 SettingsSection(title = "Chat") {
@@ -702,6 +736,65 @@ fun SettingsRoute(
 }
 
 @Composable
+private fun LocalKokoroSettingsCard(
+    settings: LocalTtsSettings,
+    testMessage: String?,
+    testRunning: Boolean,
+    onSettingsChanged: (LocalTtsSettings) -> Unit,
+    onTest: () -> Unit,
+) {
+    SettingsSection(title = "Read Aloud") {
+        SettingsPickerRow(
+            label = localizedString("Read-aloud engine"),
+            value = settings.provider.settingsDescription,
+            iconRes = com.uzairansar.hermex.R.drawable.ic_hermex_mic,
+            onClick = {
+                val next = if (settings.provider == ReadAloudProvider.Server) {
+                    ReadAloudProvider.LocalKokoro
+                } else {
+                    ReadAloudProvider.Server
+                }
+                onSettingsChanged(settings.copy(provider = next))
+            },
+        )
+        SettingsFootnote("Local Kokoro sends speech only to the URL below. Hermes credentials are never sent there.")
+        if (settings.provider == ReadAloudProvider.LocalKokoro) {
+            SettingsDivider()
+            OutlinedTextField(
+                value = settings.endpoint,
+                onValueChange = { onSettingsChanged(settings.copy(endpoint = it)) },
+                modifier = Modifier.fillMaxWidth().testTag("local_tts_endpoint"),
+                label = { Text(localizedString("Kokoro OpenAI-compatible URL")) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            )
+            OutlinedTextField(
+                value = settings.voice,
+                onValueChange = { onSettingsChanged(settings.copy(voice = it)) },
+                modifier = Modifier.fillMaxWidth().testTag("local_tts_voice"),
+                label = { Text(localizedString("Voice")) },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = settings.speed.toString(),
+                onValueChange = { value -> value.toFloatOrNull()?.let { onSettingsChanged(settings.copy(speed = it)) } },
+                modifier = Modifier.fillMaxWidth().testTag("local_tts_speed"),
+                label = { Text(localizedString("Speed (0.25–4.0)")) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+            TextButton(onClick = onTest, enabled = !testRunning) {
+                if (testRunning) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(if (testRunning) "Testing…" else "Test local Kokoro")
+            }
+            testMessage?.let { message ->
+                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsHeader(onBack: () -> Unit) {
     Box(
         modifier = Modifier
@@ -798,7 +891,10 @@ private fun ServerAccountRow(
         }
         Spacer(Modifier.height(8.dp))
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .testTag("server_account_actions"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             HermexPillButton(localizedString("Edit Identity"), onEditIdentity)
