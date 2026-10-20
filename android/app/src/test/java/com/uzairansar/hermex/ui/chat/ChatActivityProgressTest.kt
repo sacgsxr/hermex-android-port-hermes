@@ -29,29 +29,25 @@ class ChatActivityProgressTest {
 
         model = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(name = "shell", callId = "a")), model)
         assertFalse(model.hasRunning())
-        assertEquals(listOf("read", "shell"), model.recent.map { it.displayName })
+        // Newest first: shell completed after read.
+        assertEquals(listOf("shell", "read"), model.recent.map { it.displayName })
     }
 
     @Test
-    fun idPrecedenceIsCallIdOverToolCallIdOverToolUseIdOverTidOverId() {
-        // Start advertises several ID fields; the resolved key must be callId.
+    fun everyIdentityAliasIsRetainedForIntersectionMatching() {
         var model = ChatActivityProgressModel()
         model = ChatActivityProgress.apply(
-            SseEvent.ToolStarted(tool(name = "shell", callId = "primary", toolCallId = "secondary")),
+            SseEvent.ToolStarted(tool(name = "shell", callId = "primary", toolCallId = "secondary", tid = "server-tid", id = "legacy")),
             model,
         )
 
-        // A completion carrying only the lower-precedence field must NOT match.
-        val unmatched = ChatActivityProgress.apply(
+        val matched = ChatActivityProgress.apply(
             SseEvent.ToolCompleted(tool(name = "shell", toolCallId = "secondary")),
             model,
         )
-        assertEquals(model, unmatched)
-
-        // The callId completion matches and removes the running item.
-        val matched = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(callId = "primary")), model)
         assertTrue(matched.running.isEmpty())
         assertEquals(1, matched.recent.size)
+        assertEquals(setOf("primary", "secondary", "server-tid", "legacy"), model.running.single().identityAliases)
     }
 
     @Test
@@ -60,6 +56,11 @@ class ChatActivityProgressTest {
         model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "grep", toolUseId = "tu-1")), model)
         val matched = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(toolUseId = "tu-1")), model)
         assertTrue(matched.running.isEmpty())
+
+        model = ChatActivityProgressModel()
+        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "tid-tool", tid = "tid-1")), model)
+        val matchedByTid = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(tid = "tid-1")), model)
+        assertTrue(matchedByTid.running.isEmpty())
 
         model = ChatActivityProgressModel()
         model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "ls", id = "plain-id")), model)
@@ -124,13 +125,30 @@ class ChatActivityProgressTest {
     @Test
     fun anonymousCompletionFallsBackToOldestAnonymousRunningTool() {
         var model = ChatActivityProgressModel()
-        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "first")), model)
-        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "second")), model)
+        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "Tool")), model)
 
-        // No IDs anywhere: the ID-less completion claims the oldest anonymous tool.
-        model = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool()), model)
-        assertEquals(listOf("second"), model.running.map { it.displayName })
-        assertEquals("first", model.recent[0].displayName)
+        model = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(name = "Tool")), model)
+        assertTrue(model.running.isEmpty())
+        assertEquals("Tool", model.recent[0].displayName)
+    }
+
+    @Test
+    fun anonymousCompletionCannotClaimIdKeyedToolOrAmbiguousAnonymousTools() {
+        var model = ChatActivityProgressModel()
+        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "shell", callId = "id-keyed")), model)
+        model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "shell")), model)
+        model = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(name = "shell")), model)
+        assertEquals(listOf("shell"), model.running.map { it.displayName })
+        assertEquals("anon:0", model.running.single().key)
+
+        var ambiguous = ChatActivityProgressModel(
+            running = listOf(
+                ChatToolActivityItem("anon:0", "shell", null, ChatToolActivityStatus.Running, null),
+                ChatToolActivityItem("anon:1", "shell", null, ChatToolActivityStatus.Running, null),
+            ),
+        )
+        ambiguous = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(name = "shell")), ambiguous)
+        assertEquals(2, ambiguous.running.size)
     }
 
     @Test
@@ -231,7 +249,11 @@ class ChatActivityProgressTest {
 
         for (reason in ChatActivityResetReason.values()) {
             val reset = ChatActivityProgress.reset(model, reason)
-            assertEquals(ChatActivityProgressModel(), reset)
+            if (reason == ChatActivityResetReason.Reconnect) {
+                assertEquals(model, reset)
+            } else {
+                assertEquals(ChatActivityProgressModel(), reset)
+            }
         }
     }
 
@@ -260,9 +282,7 @@ class ChatActivityProgressTest {
             ChatActivityProgressModel(),
         )
 
-        val detail = model.running[0].detail!!
-        assertEquals(ChatActivityProgress.MAX_DETAIL_LENGTH, detail.length)
-        assertFalse(detail.contains("\n"))
+        assertNull(model.running[0].detail)
     }
 
     @Test

@@ -20,6 +20,7 @@ data class ChatToolActivityItem(
     val detail: String?,
     val status: ChatToolActivityStatus,
     val durationSeconds: Double?,
+    val identityAliases: Set<String> = emptySet(),
 )
 
 /**
@@ -53,11 +54,10 @@ internal enum class ChatActivityResetReason {
  * Pure reducer over [SseEvent.ToolStarted] / [SseEvent.ToolCompleted] events.
  *
  * Rules:
- * - Completions match running tools by call ID with precedence
- *   callId > toolCallId > toolUseId > tid > id (first non-blank wins).
- * - When neither the completion nor any running item has an ID, a stable fallback
- *   matches by name and then by start order. A named completion never falls back:
- *   if no running item shares its name it is dropped instead of claiming another tool.
+ * - Completions match running tools when any identity alias intersects; all server
+ *   aliases are retained so replay events can match even when field precedence changes.
+ * - ID-less fallback is allowed only for one anonymous running item with the same
+ *   sanitized name. Ambiguous anonymous events are dropped.
  * - Duplicate starts and duplicate completions are idempotent. ID-less tools with
  *   identical visible identity collapse into one tracked item because they cannot be
  *   told apart without an ID.
@@ -72,54 +72,55 @@ internal object ChatActivityProgress {
         applyTool(ToolPhase.Completed, completed.event, current)
 
     /**
-     * Clears running tools. When [retainRecent] is false (done, error, cancel,
-     * reconnect, session switch) the bounded recent history is dropped as well;
-     * pass true to keep safe recent items after a turn ends.
+     * Clears running tools for terminal/session boundaries. Reconnect is intentionally
+     * a no-op: the same stream may replay a completion after its cursor is restored.
+     * When [retainRecent] is true, safe recent items remain after a successful turn.
      */
     fun reset(current: ChatActivityProgressModel, reason: ChatActivityResetReason, retainRecent: Boolean = false): ChatActivityProgressModel =
-        if (retainRecent) {
-            current.copy(running = emptyList())
-        } else {
-            ChatActivityProgressModel()
+        when {
+            reason == ChatActivityResetReason.Reconnect -> current
+            retainRecent -> current.copy(running = emptyList())
+            else -> ChatActivityProgressModel()
         }
 
     private enum class ToolPhase { Started, Completed }
 
     private fun applyTool(phase: ToolPhase, event: ToolStreamEvent, current: ChatActivityProgressModel): ChatActivityProgressModel {
         val name = sanitizeName(event.name)
-        val detail = sanitizeDetail(event.preview)
-        val idKey = resolveIdKey(event)
+        val aliases = resolveIdentityAliases(event)
+        val idKey = aliases.firstOrNull()
         return when (phase) {
-            ToolPhase.Started -> startTool(idKey, name, detail, current)
-            ToolPhase.Completed -> completeTool(idKey, name, detail, event.duration, event.isError, current)
+            ToolPhase.Started -> startTool(idKey, aliases, name, current)
+            ToolPhase.Completed -> completeTool(aliases, name, event.duration, event.isError, current)
         }
     }
 
-    private fun startTool(idKey: String?, name: String, detail: String?, current: ChatActivityProgressModel): ChatActivityProgressModel {
+    private fun startTool(idKey: String?, aliases: Set<String>, name: String, current: ChatActivityProgressModel): ChatActivityProgressModel {
         // Duplicate starts are idempotent: same identity means the tool is already
-        // tracked and nothing changes. ID-keyed duplicates match by key; anonymous
-        // ones match by visible name/detail.
-        val duplicate = if (idKey != null) {
-            current.running.any { it.key == idKey } || current.recent.any { it.key == idKey }
+        // tracked and nothing changes. ID-keyed duplicates match by any retained alias;
+        // anonymous ones match by visible name.
+        val duplicate = if (aliases.isNotEmpty()) {
+            current.running.any { it.identityAliases.intersect(aliases).isNotEmpty() } ||
+                current.recent.any { it.identityAliases.intersect(aliases).isNotEmpty() }
         } else {
-            current.running.any { it.displayName == name && it.detail == detail }
+            current.running.any { it.identityAliases.isEmpty() && it.displayName == name }
         }
         if (duplicate) return current
 
         val running = current.running + ChatToolActivityItem(
             key = idKey ?: nextAnonymousKey(current),
             displayName = name,
-            detail = detail,
+            detail = null,
             status = ChatToolActivityStatus.Running,
             durationSeconds = null,
+            identityAliases = aliases,
         )
         return current.copy(running = running)
     }
 
     private fun completeTool(
-        idKey: String?,
+        aliases: Set<String>,
         name: String,
-        detail: String?,
         durationSeconds: Double?,
         isError: Boolean?,
         current: ChatActivityProgressModel,
@@ -128,10 +129,8 @@ internal object ChatActivityProgress {
         val status = if (failed) ChatToolActivityStatus.Failed else ChatToolActivityStatus.Completed
 
         val index = when {
-            idKey != null -> current.running.indexOfFirst { it.key == idKey }
-            // Stable fallback only when the completion carries no ID at all. A named
-            // completion that matches no running name is dropped, never mis-matched.
-            else -> matchFallbackIndex(name, detail, current)
+            aliases.isNotEmpty() -> current.running.indexOfFirst { it.identityAliases.intersect(aliases).isNotEmpty() }
+            else -> matchFallbackIndex(name, current)
         }
         if (index < 0) return current
 
@@ -141,7 +140,7 @@ internal object ChatActivityProgress {
         if (matched.status != ChatToolActivityStatus.Running && matched.status == status) return current
 
         val finished = matched.copy(
-            detail = matched.detail ?: detail,
+            detail = null,
             status = status,
             durationSeconds = durationSeconds?.takeIf { it.isFinite() && it >= 0.0 },
         )
@@ -150,21 +149,20 @@ internal object ChatActivityProgress {
         return current.copy(running = running, recent = recent)
     }
 
-    /** callId > toolCallId > toolUseId > tid > id; first non-blank wins. */
-    private fun resolveIdKey(event: ToolStreamEvent): String? = listOfNotNull(
+    /** Retain every actual server identity alias; tid is a server tool identity. */
+    private fun resolveIdentityAliases(event: ToolStreamEvent): Set<String> = listOfNotNull(
         event.callId,
         event.toolCallId,
         event.toolUseId,
         event.tid,
         event.id,
-    ).firstOrNull { it.isNotBlank() }?.trim()
+    ).mapNotNull { it.trim().takeIf(String::isNotBlank) }.take(MAX_IDENTITY_ALIASES).toSet()
 
-    private fun matchFallbackIndex(name: String, detail: String?, current: ChatActivityProgressModel): Int {
-        val byName = current.running.indexOfFirst { it.displayName == name }
-        if (byName >= 0) return byName
-        if (name != DEFAULT_NAME) return -1
-        // Anonymous completion with no ID: claim the oldest anonymous running tool.
-        return current.running.indexOfFirst { it.key.startsWith(ANONYMOUS_KEY_PREFIX) }
+    private fun matchFallbackIndex(name: String, current: ChatActivityProgressModel): Int {
+        val matches = current.running.withIndex().filter { (_, item) ->
+            item.identityAliases.isEmpty() && item.displayName == name
+        }
+        return matches.singleOrNull()?.index ?: -1
     }
 
     private fun nextAnonymousKey(current: ChatActivityProgressModel): String {
@@ -179,6 +177,7 @@ internal object ChatActivityProgress {
 
     private const val ANONYMOUS_KEY_PREFIX = "anon:"
     private const val DEFAULT_NAME = "Tool"
+    private const val MAX_IDENTITY_ALIASES = 5
 
     // --- Sanitization ---------------------------------------------------------
     // Visible strings are short, single-line, and free of raw arguments/results.

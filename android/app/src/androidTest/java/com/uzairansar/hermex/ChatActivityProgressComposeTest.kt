@@ -6,6 +6,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,7 +31,7 @@ class ChatActivityProgressComposeTest {
     private val completed = ChatToolActivityItem(
         key = "call:1",
         displayName = "shell",
-        detail = "safe preview",
+        detail = null,
         status = ChatToolActivityStatus.Completed,
         durationSeconds = 1.25,
     )
@@ -43,10 +46,18 @@ class ChatActivityProgressComposeTest {
 
         composeRule.onNodeWithTag("chat_activity_progress").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_activity_progress_details").assertDoesNotExist()
+        composeRule.onNodeWithTag("chat_activity_progress_toggle").assertHasClickAction()
+        composeRule.onNodeWithTag("chat_activity_progress_toggle").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expand section"),
+        )
         composeRule.onNodeWithTag("chat_activity_progress_toggle").performClick()
+        composeRule.onNodeWithTag("chat_activity_progress_toggle").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapse section"),
+        )
         composeRule.onNodeWithTag("chat_activity_progress_details").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_activity_progress_item_call:1").assertIsDisplayed()
-        composeRule.onNodeWithText("shell — safe preview (1.3s)").assertIsDisplayed()
+        composeRule.onNodeWithText("Completed").assertIsDisplayed()
+        composeRule.onNodeWithText("shell (1.3s)").assertIsDisplayed()
     }
 
     @Test
@@ -74,8 +85,10 @@ class ChatActivityProgressComposeTest {
         composeRule.onNodeWithTag("chat_activity_progress_details").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_activity_progress_item_call:2").assertIsDisplayed()
         composeRule.onNodeWithTag("chat_activity_progress_item_call:3").assertIsDisplayed()
-        composeRule.onNodeWithText("browser.search — safe preview").assertIsDisplayed()
-        composeRule.onNodeWithText("shell.failed — safe preview (1.3s)").assertIsDisplayed()
+        composeRule.onNodeWithText("Running").assertIsDisplayed()
+        composeRule.onNodeWithText("Failed").assertIsDisplayed()
+        composeRule.onNodeWithText("browser.search").assertIsDisplayed()
+        composeRule.onNodeWithText("shell.failed (1.3s)").assertIsDisplayed()
     }
 
     @Test

@@ -3796,8 +3796,7 @@ class ChatViewModel internal constructor(
                     isStreaming = true,
                     activeStreamRecoveryState = ActiveStreamRecoveryState.Checking,
                     activeStreamId = streamId,
-                    liveToolActivity = null,
-                    activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Reconnect),
+                    liveToolActivity = it.activityProgress.running.firstOrNull()?.displayName,
                     notice = ActiveStreamRecoveryState.Checking.label,
                     error = null,
                 )

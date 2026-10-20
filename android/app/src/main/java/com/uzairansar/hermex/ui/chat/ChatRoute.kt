@@ -123,7 +123,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -5682,7 +5685,11 @@ internal fun ChatActivityProgressCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = !expanded }
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .semantics {
+                    contentDescription = "${localizedString("Activity")}: $summary"
+                    stateDescription = localizedString(if (expanded) "Collapse section" else "Expand section")
+                }
                 .testTag("chat_activity_progress_toggle"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -5711,11 +5718,13 @@ internal fun ChatActivityProgressCard(
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
                         Text(
-                            when (item.status) {
-                                ChatToolActivityStatus.Running -> "•"
-                                ChatToolActivityStatus.Completed -> "✓"
-                                ChatToolActivityStatus.Failed -> "!"
-                            },
+                            localizedString(
+                                when (item.status) {
+                                    ChatToolActivityStatus.Running -> "Running"
+                                    ChatToolActivityStatus.Completed -> "Completed"
+                                    ChatToolActivityStatus.Failed -> "Failed"
+                                },
+                            ),
                             color = MaterialTheme.colorScheme.secondary,
                             style = MaterialTheme.typography.labelSmall,
                         )
