@@ -139,7 +139,7 @@ class ChatActivityProgressTest {
         model = ChatActivityProgress.apply(SseEvent.ToolStarted(tool(name = "shell")), model)
         model = ChatActivityProgress.apply(SseEvent.ToolCompleted(tool(name = "shell")), model)
         assertEquals(listOf("shell"), model.running.map { it.displayName })
-        assertEquals("anon:0", model.running.single().key)
+        assertEquals("id-keyed", model.running.single().key)
 
         var ambiguous = ChatActivityProgressModel(
             running = listOf(
