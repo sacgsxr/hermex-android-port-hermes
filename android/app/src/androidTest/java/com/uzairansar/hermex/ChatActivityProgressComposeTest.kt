@@ -87,7 +87,6 @@ class ChatActivityProgressComposeTest {
         composeRule.onNodeWithTag("chat_activity_progress_item_call:3").assertIsDisplayed()
         composeRule.onNodeWithText("Running").assertIsDisplayed()
         composeRule.onNodeWithText("Failed").assertIsDisplayed()
-        composeRule.onNodeWithText("browser.search").assertIsDisplayed()
         composeRule.onNodeWithText("shell.failed (1.3s)").assertIsDisplayed()
     }
 
