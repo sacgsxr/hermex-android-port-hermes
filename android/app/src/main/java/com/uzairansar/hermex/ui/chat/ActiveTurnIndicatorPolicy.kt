@@ -53,6 +53,13 @@ internal fun ChatUiState.activeTurnIndicator(): ActiveTurnIndicator? {
         ActiveStreamRecoveryState.Idle -> Unit
     }
 
+    activityProgress.running.firstOrNull()?.let { runningTool ->
+        return ActiveTurnIndicator(
+            activity = ActiveTurnIndicatorActivity.RunningTool,
+            label = "Running",
+            toolName = runningTool.displayName.takeIf { it.isNotBlank() },
+        )
+    }
     liveToolActivity?.takeIf { it.isNotBlank() }?.let { activity ->
         val toolName = activity.safeToolName()
         return ActiveTurnIndicator(

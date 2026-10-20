@@ -56,6 +56,28 @@ class ActiveTurnIndicatorPolicyTest {
     }
 
     @Test
+    fun reducerRunningToolWinsWhenLegacyLiveToolActivityIsEmpty() {
+        val indicator = ChatUiState(
+            isStreaming = true,
+            activeStreamId = "stream-1",
+            activityProgress = ChatActivityProgressModel(
+                running = listOf(
+                    ChatToolActivityItem(
+                        key = "call:a",
+                        displayName = "browser.search",
+                        detail = null,
+                        status = ChatToolActivityStatus.Running,
+                        durationSeconds = null,
+                    ),
+                ),
+            ),
+        ).activeTurnIndicator()
+
+        assertEquals(ActiveTurnIndicatorActivity.RunningTool, indicator?.activity)
+        assertEquals("browser.search", indicator?.toolName)
+    }
+
+    @Test
     fun activeTurnFallsBackToTruthfulPhaseAndClearsAtCompletion() {
         assertEquals(
             ActiveTurnIndicatorActivity.Thinking,

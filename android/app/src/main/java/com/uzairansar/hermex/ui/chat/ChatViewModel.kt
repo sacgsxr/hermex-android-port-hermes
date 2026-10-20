@@ -364,6 +364,7 @@ data class ChatUiState(
     val isViewingCachedData: Boolean = false,
     val liveReasoning: String = "",
     val liveToolActivity: String? = null,
+    val activityProgress: ChatActivityProgressModel = ChatActivityProgressModel(),
     val openSessionId: String? = null,
     val notice: String? = null,
     val error: String? = null,
@@ -620,6 +621,7 @@ class ChatViewModel internal constructor(
                     activeStreamId = null,
                     liveReasoning = "",
                     liveToolActivity = null,
+                    activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Cancelled),
                 )
             }
         }
@@ -726,6 +728,16 @@ class ChatViewModel internal constructor(
                     } else {
                         ActiveStreamRecoveryState.Idle
                     },
+                    activityProgress = if (
+                        current.isStreaming &&
+                        snapshot.isStreaming &&
+                        current.activeStreamId == snapshot.activeStreamId
+                    ) {
+                        current.activityProgress
+                    } else {
+                        ChatActivityProgress.reset(current.activityProgress, ChatActivityResetReason.SessionSwitch)
+                    },
+                    liveToolActivity = null,
                 ),
             )
         }
@@ -2116,6 +2128,7 @@ class ChatViewModel internal constructor(
                 pendingAttachments = it.pendingAttachments - snapshot.pendingAttachments.toSet(),
                 isStreaming = true,
                 error = null,
+                activityProgress = ChatActivityProgressModel(),
             )
         }
         persistPendingState()
@@ -2310,6 +2323,7 @@ class ChatViewModel internal constructor(
                             responseCompletionNeedsTranscriptRefresh = false,
                             liveReasoning = "",
                             liveToolActivity = null,
+                            activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.SessionSwitch),
                             sessionTitle = clearedSnapshot.title.nonBlank() ?: "Untitled",
                             error = null,
                             notice = "Conversation cleared.",
@@ -2343,6 +2357,7 @@ class ChatViewModel internal constructor(
                     activeStreamId = null,
                     liveReasoning = "",
                     liveToolActivity = null,
+                    activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Cancelled),
                 )
             }
             pendingStart?.join()
@@ -2385,6 +2400,7 @@ class ChatViewModel internal constructor(
                 activeStreamId = null,
                 liveReasoning = "",
                 liveToolActivity = null,
+                activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Cancelled),
                 pendingApproval = null,
                 pendingClarification = null,
             )
@@ -3506,11 +3522,23 @@ class ChatViewModel internal constructor(
                     }
                     is SseEvent.ToolStarted -> {
                         markStreamProgress()
-                        _state.update { it.copy(liveToolActivity = event.event.name ?: "Tool running") }
+                        _state.update {
+                            val progress = ChatActivityProgress.apply(event, it.activityProgress)
+                            it.copy(
+                                activityProgress = progress,
+                                liveToolActivity = progress.running.firstOrNull()?.displayName,
+                            )
+                        }
                     }
                     is SseEvent.ToolCompleted -> {
                         markStreamProgress()
-                        _state.update { it.copy(liveToolActivity = null) }
+                        _state.update {
+                            val progress = ChatActivityProgress.apply(event, it.activityProgress)
+                            it.copy(
+                                activityProgress = progress,
+                                liveToolActivity = progress.running.firstOrNull()?.displayName,
+                            )
+                        }
                     }
                     is SseEvent.Title -> {
                         if (event.sessionId.isNullOrBlank() || event.sessionId == sessionId) {
@@ -3614,7 +3642,7 @@ class ChatViewModel internal constructor(
                         lastTransportActivityAtMillis = lastStreamTransportActivityAtMillis,
                         lastStatusCheckAtMillis = lastStreamStatusCheckAtMillis,
                         hasPendingPrompt = false,
-                        hasRunningTool = current.liveToolActivity != null,
+                        hasRunningTool = current.activityProgress.hasRunning(),
                     )
                 ) {
                     ChatStreamLivenessAction.CheckStatus -> recoverTransportQuietStream(
@@ -3769,6 +3797,7 @@ class ChatViewModel internal constructor(
                     activeStreamRecoveryState = ActiveStreamRecoveryState.Checking,
                     activeStreamId = streamId,
                     liveToolActivity = null,
+                    activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Reconnect),
                     notice = ActiveStreamRecoveryState.Checking.label,
                     error = null,
                 )
@@ -3812,6 +3841,7 @@ class ChatViewModel internal constructor(
                                 activeStreamId = null,
                                 liveReasoning = "",
                                 liveToolActivity = null,
+                                activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Error),
                                 notice = null,
                                 error = status.error.nonBlank(),
                             )
@@ -4068,6 +4098,7 @@ class ChatViewModel internal constructor(
                 activeStreamId = null,
                 liveReasoning = "",
                 liveToolActivity = null,
+                activityProgress = ChatActivityProgress.reset(it.activityProgress, ChatActivityResetReason.Error),
                 error = error,
             )
         }
@@ -4154,6 +4185,11 @@ class ChatViewModel internal constructor(
                 responseCompletionNeedsTranscriptRefresh = needsTranscriptRefresh,
                 liveReasoning = "",
                 liveToolActivity = null,
+                activityProgress = ChatActivityProgress.reset(
+                    it.activityProgress,
+                    ChatActivityResetReason.Done,
+                    retainRecent = true,
+                ),
                 pendingApproval = null,
                 pendingClarification = null,
             )
@@ -4232,6 +4268,11 @@ class ChatViewModel internal constructor(
                 responseCompletionNeedsTranscriptRefresh = needsTranscriptRefresh,
                 liveReasoning = "",
                 liveToolActivity = null,
+                activityProgress = ChatActivityProgress.reset(
+                    it.activityProgress,
+                    ChatActivityResetReason.Done,
+                    retainRecent = true,
+                ),
                 pendingApproval = null,
                 pendingClarification = null,
             )

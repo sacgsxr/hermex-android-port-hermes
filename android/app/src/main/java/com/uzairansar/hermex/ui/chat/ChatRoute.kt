@@ -1109,13 +1109,13 @@ fun ChatRoute(
                             )
                         }
                     }
-                    state.liveToolActivity
-                        ?.takeIf { chatDisplaySettings.showThinkingAndToolCards && it.isNotBlank() }
-                        ?.let { toolActivity ->
-                            item("live-tool-activity") {
-                                LiveToolActivityCard(
-                                    activity = toolActivity,
-                                    startsExpanded = chatDisplaySettings.toolCardsStartExpanded,
+                    state.activityProgress
+                        .takeIf { chatDisplaySettings.showThinkingAndToolCards && (it.hasRunning() || it.recent.isNotEmpty()) }
+                        ?.let { activity ->
+                            item("chat-activity-progress") {
+                                ChatActivityProgressCard(
+                                    progress = activity,
+                                    resetKey = state.activeStreamId ?: sessionId,
                                 )
                             }
                         }
@@ -1471,7 +1471,7 @@ fun ChatRoute(
 private fun ChatUiState.showsAssistantTypingIndicator(showThinkingAndToolCards: Boolean): Boolean {
         if (!isStreaming || activeStreamId.isNullOrBlank()) return false
         if (pendingApproval != null || pendingClarification != null) return false
-        if (showThinkingAndToolCards && (liveReasoning.isNotBlank() || !liveToolActivity.isNullOrBlank())) return false
+        if (showThinkingAndToolCards && (liveReasoning.isNotBlank() || !liveToolActivity.isNullOrBlank() || activityProgress.hasRunning())) return false
         return messages.none { message ->
             message.role == "assistant" &&
                 message.id == "streaming" &&
@@ -5647,16 +5647,26 @@ private fun ReasoningAccessoryCard(
 }
 
 @Composable
-private fun LiveToolActivityCard(
-    activity: String,
-    startsExpanded: Boolean = false,
+internal fun ChatActivityProgressCard(
+    progress: ChatActivityProgressModel,
+    resetKey: String = "activity",
 ) {
-    val trimmed = activity.trim()
-    if (trimmed.isEmpty()) return
-    var userToggledExpansion by remember { mutableStateOf<Boolean?>(null) }
-    val expanded = userToggledExpansion ?: startsExpanded
-    val accentColor = MaterialTheme.colorScheme.secondary
-
+    var expanded by remember(resetKey) { mutableStateOf(false) }
+    val items = progress.running + progress.recent
+    val runningCount = progress.running.size
+    val summary = progress.running.firstOrNull()?.let { running ->
+        buildString {
+            append(running.displayName)
+            if (runningCount > 1) append(" +").append(runningCount - 1)
+        }
+    } ?: progress.recent.firstOrNull()?.let { recent ->
+        val outcome = when (recent.status) {
+            ChatToolActivityStatus.Completed -> localizedString("Completed")
+            ChatToolActivityStatus.Failed -> localizedString("Failed")
+            ChatToolActivityStatus.Running -> localizedString("Running")
+        }
+        "${recent.displayName} — $outcome"
+    } ?: localizedString("Activity")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -5665,47 +5675,63 @@ private fun LiveToolActivityCard(
                 castsShadow = false,
                 surfaceLevel = HermexSurfaceLevel.Raised,
             )
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalArrangement = Arrangement.spacedBy(if (expanded) 8.dp else 0.dp),
+            .testTag("chat_activity_progress")
+            .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { userToggledExpansion = !expanded },
+                .clickable { expanded = !expanded }
+                .testTag("chat_activity_progress_toggle"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Image(
-                painter = painterResource(com.uzairansar.hermex.R.drawable.ic_lucide_hammer),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                colorFilter = ColorFilter.tint(accentColor),
-            )
+            Text(localizedString("Activity"), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                localizedString("Tool"),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-            Text(
-                trimmed,
+                summary,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            TranscriptStatusPill(text = localizedString("Running"), color = accentColor)
-            Text(
-                if (expanded) "\u2303" else "\u2304",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Text(if (expanded) "⌃" else "⌄", style = MaterialTheme.typography.labelSmall)
         }
         if (expanded) {
-            ToolDetailSection(title = localizedString("Activity"), value = trimmed)
+            Column(
+                modifier = Modifier
+                    .padding(top = 7.dp)
+                    .testTag("chat_activity_progress_details"),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                items.take(ChatActivityProgressModel.MAX_RECENT + progress.running.size).forEach { item ->
+                    Row(
+                        modifier = Modifier.testTag("chat_activity_progress_item_${item.key}"),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Text(
+                            when (item.status) {
+                                ChatToolActivityStatus.Running -> "•"
+                                ChatToolActivityStatus.Completed -> "✓"
+                                ChatToolActivityStatus.Failed -> "!"
+                            },
+                            color = MaterialTheme.colorScheme.secondary,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            buildString {
+                                append(item.displayName)
+                                item.detail?.let { append(" — ").append(it) }
+                                item.durationSeconds?.let { append(" (").append("%.1fs".format(it)).append(")") }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }
