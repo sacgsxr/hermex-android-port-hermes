@@ -1320,6 +1320,7 @@ class HermexUiFlowTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { hasText("Post-done title") }
 
         composeRule.onNodeWithText("Mock response").assertExists()
+        assertTrue(composeRule.onAllNodesWithTag("listen_playback_bar").fetchSemanticsNodes().isEmpty())
         val topBarBounds = composeRule.onNodeWithTag("chat_top_bar").fetchSemanticsNode().boundsInRoot
         val transcriptBounds = composeRule.onNodeWithTag("chat_transcript").fetchSemanticsNode().boundsInRoot
         assertTrue(transcriptBounds.top < topBarBounds.bottom)
