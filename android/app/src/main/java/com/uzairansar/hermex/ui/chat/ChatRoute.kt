@@ -5657,6 +5657,7 @@ internal fun ChatActivityProgressCard(
     var expanded by remember(resetKey) { mutableStateOf(false) }
     val items = progress.running + progress.recent
     val runningCount = progress.running.size
+    val activityLabel = localizedString("Activity")
     val summary = progress.running.firstOrNull()?.let { running ->
         buildString {
             append(running.displayName)
@@ -5669,7 +5670,8 @@ internal fun ChatActivityProgressCard(
             ChatToolActivityStatus.Running -> localizedString("Running")
         }
         "${recent.displayName} — $outcome"
-    } ?: localizedString("Activity")
+    } ?: activityLabel
+    val expansionLabel = localizedString(if (expanded) "Collapse section" else "Expand section")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -5687,14 +5689,14 @@ internal fun ChatActivityProgressCard(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(role = Role.Button) { expanded = !expanded }
                 .semantics {
-                    contentDescription = "${localizedString("Activity")}: $summary"
-                    stateDescription = localizedString(if (expanded) "Collapse section" else "Expand section")
+                    contentDescription = "$activityLabel: $summary"
+                    stateDescription = expansionLabel
                 }
                 .testTag("chat_activity_progress_toggle"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(localizedString("Activity"), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+            Text(activityLabel, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 summary,
                 modifier = Modifier.weight(1f),
