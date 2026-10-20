@@ -1205,19 +1205,6 @@ fun ChatRoute(
             ) {
                 CompositionLocalProvider(LocalLayoutDirection provides chatLayoutDirection) {
                     Column {
-                        if (listenPlaybackState.showsPlaybackBar) {
-                            ListenPlaybackBar(
-                                state = listenPlaybackState,
-                                onTogglePlayPause = listenPlaybackController::togglePlayPause,
-                                onSeek = listenPlaybackController::seekTo,
-                                onSpeedChange = listenPlaybackController::setSpeed,
-                                onStop = {
-                                    speechJob?.cancel()
-                                    speechJob = null
-                                    listenPlaybackController.stop()
-                                },
-                            )
-                        }
                         ComposerSurface(
                             state = state,
                             isVoiceDictating = isVoiceDictating,
@@ -3170,101 +3157,6 @@ private fun ContextWindowInfoRow(
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
         )
-    }
-}
-
-@Composable
-private fun ListenPlaybackBar(
-    state: ListenPlaybackUiState,
-    onTogglePlayPause: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onSpeedChange: (ListenPlaybackSpeed) -> Unit,
-    onStop: () -> Unit,
-) {
-    var showsSpeedMenu by remember { mutableStateOf(false) }
-    val playbackPositionDescription = localizedString("Listen")
-    val maximumPosition = state.durationMillis.coerceAtLeast(1).toFloat()
-    val currentPosition = state.elapsedMillis.coerceIn(0, state.durationMillis.coerceAtLeast(0)).toFloat()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-            .testTag("listen_playback_bar"),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (state.phase == ListenPlaybackPhase.Loading) {
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-            } else {
-                HermexIconButton(
-                    label = localizedString(if (state.isPlaying) "Pause" else "Listen"),
-                    symbol = if (state.isPlaying) "Ⅱ" else "▶",
-                    onClick = onTogglePlayPause,
-                    enabled = state.isReady,
-                    modifier = Modifier.size(36.dp),
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Slider(
-                    value = currentPosition.coerceIn(0f, maximumPosition),
-                    onValueChange = { onSeek(it.toLong()) },
-                    valueRange = 0f..maximumPosition,
-                    enabled = state.isReady && state.durationMillis > 0,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(28.dp)
-                        .semantics { contentDescription = playbackPositionDescription },
-                )
-                Text(
-                    text = "${formatPlaybackDuration(state.elapsedMillis)} / ${formatPlaybackDuration(state.durationMillis)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-            }
-            Box {
-                TextButton(
-                    onClick = { showsSpeedMenu = true },
-                    enabled = state.isReady,
-                    modifier = Modifier.semantics { contentDescription = state.speed.title },
-                ) {
-                    Text(state.speed.title, fontWeight = FontWeight.SemiBold)
-                }
-                DropdownMenu(
-                    expanded = showsSpeedMenu,
-                    onDismissRequest = { showsSpeedMenu = false },
-                ) {
-                    ListenPlaybackSpeed.entries.forEach { speed ->
-                        DropdownMenuItem(
-                            text = { Text(speed.title) },
-                            trailingIcon = {
-                                if (speed == state.speed) Text("✓")
-                            },
-                            onClick = {
-                                showsSpeedMenu = false
-                                onSpeedChange(speed)
-                            },
-                        )
-                    }
-                }
-            }
-            HermexIconButton(
-                label = localizedString("Stop Listening"),
-                symbol = "×",
-                onClick = onStop,
-                modifier = Modifier.size(36.dp),
-            )
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

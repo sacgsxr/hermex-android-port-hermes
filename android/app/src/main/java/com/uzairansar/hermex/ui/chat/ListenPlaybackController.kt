@@ -54,9 +54,6 @@ internal data class ListenPlaybackUiState(
     val speed: ListenPlaybackSpeed = ListenPlaybackSpeed.Normal,
     val hasSeekableAudio: Boolean = false,
 ) {
-    val showsPlaybackBar: Boolean
-        get() = phase == ListenPlaybackPhase.Loading || hasSeekableAudio
-
     val isPlaying: Boolean
         get() = phase == ListenPlaybackPhase.Playing
 
@@ -459,11 +456,4 @@ internal class ListenPlaybackController(context: Context) {
                 PlaybackState.ACTION_STOP or
                 PlaybackState.ACTION_SEEK_TO
     }
-}
-
-internal fun formatPlaybackDuration(durationMillis: Long): String {
-    val totalSeconds = (durationMillis.coerceAtLeast(0) / 1_000)
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(Locale.ROOT, minutes, seconds)
 }
